@@ -3,10 +3,11 @@ import os
 import http.server
 import socketserver
 import threading
+import re
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, MessageHandler, filters
 
-# 1. Render ko Live rakhne ke liye Server
+# 1. Render Dummy Server
 def start_dummy_server():
     PORT = int(os.environ.get("PORT", 10000))
     Handler = http.server.SimpleHTTPRequestHandler
@@ -16,37 +17,50 @@ def start_dummy_server():
     except Exception:
         pass
 
-# ⚠️ APNA TEXT YAHAN BADLO (Ye sirf ek example hai)
-OLD_TEXT = "TvShowHub"       # Jo text ya link hatana hai
-NEW_TEXT = "DG_Contents"       # Jo naya text ya link lagana hai
+# ⚠️ YAHAN APNA TEXT SET KAREIN
+OLD_TEXT = "TvShowHub"
+NEW_TEXT = "DG_Contents"
 
-# 2. Channel Post ko Edit karne wala Logic
+# 2. Heavy Duty Channel Editor Logic
 async def edit_channel_caption(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Channel ki post uthayein (Chahe video ho, photo ho ya document)
-    channel_post = update.channel_post
-    
-    # Agar post me pehle se koi caption (text) likha hai
-    if channel_post and channel_post.caption:
-        current_caption = channel_post.caption
-        
-        # Agar purana text caption me maujood hai, toh use badlo
-        if OLD_TEXT in current_caption:
-            new_caption = current_caption.replace(OLD_TEXT, NEW_TEXT)
-            
-            try:
-                # Channel me caption ko automatic edit kar do
-                await context.bot.edit_message_caption(
-                    chat_id=channel_post.chat_id,
-                    message_id=channel_post.message_id,
-                    caption=new_caption
-                )
-                print("Caption successfully updated in channel!")
-            except Exception as e:
-                print(f"Error editing caption: {e}")
+    # Channel post ko capture karein
+    msg = update.channel_post or update.edited_channel_post
+    if not msg:
+        return
 
-# Bot ka Start Command
+    # Check karein ki text message hai ya koi media caption hai
+    text_to_check = msg.text or msg.caption
+    if not text_to_check:
+        return
+
+    # Case-Insensitive checking ke liye re.search use karenge
+    # Isse agar tvshowhub, TvShowHub ya TVSHOWHUB kuch bhi hoga, toh pakda jayega
+    if re.search(OLD_TEXT, text_to_check, re.IGNORECASE):
+        # Text ko replace karein (case-insensitive tareeqe se)
+        pattern = re.compile(OLD_TEXT, re.IGNORECASE)
+        new_text = pattern.sub(NEW_TEXT, text_to_check)
+
+        try:
+            if msg.caption:
+                # Agar photo/video ka caption hai
+                await context.bot.edit_message_caption(
+                    chat_id=msg.chat_id,
+                    message_id=msg.message_id,
+                    caption=new_text
+                )
+            elif msg.text:
+                # Agar sirf normal text message hai
+                await context.bot.edit_message_text(
+                    chat_id=msg.chat_id,
+                    message_id=msg.message_id,
+                    text=new_text
+                )
+            print("Successfully Edited!")
+        except Exception as e:
+            print(f"Edit failed: {e}")
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Hyy Bhai! Auto Caption Editor Bot active hai. Mujhe channel me Admin banayein.")
+    await update.message.reply_text("Hyy Bhai! Bot ekdum active hai.")
 
 def main():
     threading.Thread(target=start_dummy_server, daemon=True).start()
@@ -59,8 +73,8 @@ def main():
     
     app.add_handler(CommandHandler("start", start))
     
-    # Yeh line channel ki posts ko track karegi (Sirf text/caption wali posts)
-    app.add_handler(MessageHandler(filters.ChatType.CHANNEL & filters.CAPTION, edit_channel_caption))
+    # Is baar hum saare channel updates track kar rahe hain bina kisi filter ke lafde ke
+    app.add_handler(MessageHandler(filters.ChatType.CHANNEL, edit_channel_caption))
     
     print("Bot is polling...")
     app.run_polling()
