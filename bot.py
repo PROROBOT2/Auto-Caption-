@@ -7,7 +7,7 @@ import re
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, MessageHandler, filters
 
-# 1. Render Dummy Server
+# 1. Render Dummy Server (Bot ko dynamic ports par active rakhne ke liye)
 def start_dummy_server():
     PORT = int(os.environ.get("PORT", 10000))
     Handler = http.server.SimpleHTTPRequestHandler
@@ -17,18 +17,14 @@ def start_dummy_server():
     except Exception:
         pass
 
-# ⚠️ DYNAMIC MULTIPLE TEXT STORAGE (Default values)
+# ⚠️ DYNAMIC MULTIPLE TEXT STORAGE (Default Generic Values)
 # Format: {"purana_word": "naya_word"}
 REPLACEMENT_RULES = {
-    "OldBrandName": "NewBrandName",
     "MovieHub": "DG_Contents",
     "JoinUs": "SubscribeNow"
 }
 
-# Default text jo tab use hoga agar text me koi matching word na mile par bold karna ho
-DEFAULT_NEW_TEXT = "DG_Contents"
-
-# 2. Heavy Duty Channel Editor Logic (With Auto-Bold & Multiple Word Replacement)
+# 2. Heavy Duty Channel Editor Logic (With Standard Formatting Check)
 async def edit_channel_caption(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global REPLACEMENT_RULES
     
@@ -40,29 +36,22 @@ async def edit_channel_caption(update: Update, context: ContextTypes.DEFAULT_TYP
     if not text_to_check:
         return
 
-    # 🛑 Loop Protection: Agar message pehle se hi BOLD hai toh skip karein
-    if text_to_check.startswith("<b>") and text_to_check.endswith("</b>"):
-        return
-
     final_text = text_to_check
-    is_replaced = False
 
-    # 1. Loop chala kar saare rules check karein aur replace karein (Case-Insensitive)
+    # 1. Loop chala kar saare rules ek sath check aur replace karein (Case-Insensitive)
     for old_txt, new_txt in REPLACEMENT_RULES.items():
         if re.search(old_txt, final_text, re.IGNORECASE):
             pattern = re.compile(old_txt, re.IGNORECASE)
             final_text = pattern.sub(new_txt, final_text)
-            is_replaced = True
 
-    # 2. Pure message ko BOLD format me convert karein
+    # 2. Pure message ko BOLD HTML format me convert karein
     bold_text = f"<b>{final_text}</b>"
-
-    # Agar koi text change nahi hua aur na hi bold lagane ki zaroorat hai, toh edit mat karo
-    if bold_text == text_to_check:
-        return
 
     try:
         if msg.caption:
+            # Loop Protection: Agar purana caption pehle se bold hai to edit skip karein
+            if msg.caption_html == bold_text:
+                return
             await context.bot.edit_message_caption(
                 chat_id=msg.chat_id,
                 message_id=msg.message_id,
@@ -70,6 +59,9 @@ async def edit_channel_caption(update: Update, context: ContextTypes.DEFAULT_TYP
                 parse_mode="HTML"
             )
         elif msg.text:
+            # Loop Protection: Agar purana text pehle se bold hai to edit skip karein
+            if msg.text_html == bold_text:
+                return
             await context.bot.edit_message_text(
                 chat_id=msg.chat_id,
                 message_id=msg.message_id,
@@ -78,22 +70,21 @@ async def edit_channel_caption(update: Update, context: ContextTypes.DEFAULT_TYP
             )
         print("Successfully Replaced Multiple Words and Bolded!")
     except Exception as e:
-        print(f"Edit failed: {e}")
+        print(f"Edit log/status: {e}")
 
 # 3. Dynamic Commands for Multiple Texts
 async def add_rule(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global REPLACEMENT_RULES
-    # Expected format: /addrule purana -> naya
     raw_args = " ".join(context.args)
-    if "->" not in raw_args:
+    if " -> " not in raw_args:
         await update.message.reply_text(
-            "❌ <b>Sahi Tarika:</b>\n<code>/addrule [purana_text] -> [naya_text]</code>\n\n<b>Example:</b>\n<code>/addrule MovieHub -> DG_Contents</code>", 
+            "❌ <b>Sahi Tarika:</b>\n<code>/addrule [purana] -> [naya]</code>\n\n<b>Example:</b>\n<code>/addrule MovieHub -> DG_Contents</code>", 
             parse_mode="HTML"
         )
         return
     
     try:
-        old_part, new_part = raw_args.split("->")
+        old_part, new_part = raw_args.split(" -> ", 1)
         old_text = old_part.strip()
         new_text = new_part.strip()
         
@@ -103,7 +94,7 @@ async def add_rule(update: Update, context: ContextTypes.DEFAULT_TYPE):
         REPLACEMENT_RULES[old_text] = new_text
         await update.message.reply_text(f"✅ Rule Added!\n🔍 Search: <code>{old_text}</code>\n✏️ Replace: <code>{new_text}</code>", parse_mode="HTML")
     except Exception:
-        await update.message.reply_text("❌ Kuch galat hua. Check karein ki '->' lagaya hai ya nahi.")
+        await update.message.reply_text("❌ Galat format. Beech me space dekar ' -> ' likhein.")
 
 async def del_rule(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global REPLACEMENT_RULES
@@ -165,7 +156,7 @@ def main():
     # Channel message handler
     app.add_handler(MessageHandler(filters.ChatType.CHANNEL, edit_channel_caption))
     
-    print("Bot is polling with Multiple Replacement features...")
+    print("Bot is polling with Super-Clean Mode...")
     app.run_polling()
 
 if __name__ == '__main__':
