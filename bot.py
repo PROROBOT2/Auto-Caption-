@@ -1,19 +1,17 @@
 import os
+import asyncio
 from telegram import Update
 from telegram.ext import Application, MessageHandler, filters, ContextTypes
 
-# The bot will safely read your token from Render's settings later
 TOKEN = os.environ.get("BOT_TOKEN")
 
 async def replace_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message and update.message.text:
         original_text = update.message.text
         
-        # EDIT THIS PART: Put the words you want to find and replace here!
-        # Syntax: original_text.replace("OLD WORD", "NEW WORD")
+        # Yahan aap apna badalne wala shabd badal sakte ho
         modified_text = original_text.replace("Apple", "Orange")
         
-        # If the text changed, the bot sends the new version back
         if original_text != modified_text:
             await update.message.reply_text(f"Edited: {modified_text}")
 
@@ -21,6 +19,13 @@ def main():
     if not TOKEN:
         print("Error: BOT_TOKEN environment variable not set!")
         return
+        
+    # Python 3.14 ke event loop error ko theek karne ke liye:
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
         
     app = Application.builder().token(TOKEN).build()
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, replace_text))
