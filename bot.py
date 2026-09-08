@@ -17,13 +17,13 @@ def start_dummy_server():
     except Exception:
         pass
 
-# ⚠️ MULTIPLE TEXT STORAGE
+# ⚠️ MULTIPLE TEXT STORAGE (Aapki list)
 REPLACEMENT_RULES = {
     "MovieHub": "DG_Contents",
     "JoinUs": "SubscribeNow"
 }
 
-# 2. Main Channel Editor Logic
+# 2. Heavy Duty Channel Editor Logic
 async def edit_channel_caption(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global REPLACEMENT_RULES
     
@@ -35,24 +35,21 @@ async def edit_channel_caption(update: Update, context: ContextTypes.DEFAULT_TYP
     if not text_to_check:
         return
 
-    # Loop Protection: Agar pehle se exact html formatting match ho to skip karein
-    if msg.caption_html and msg.caption_html.startswith("<b>") and msg.caption_html.endswith("</b>"):
-        return
-    if msg.text_html and msg.text_html.startswith("<b>") and msg.text_html.endswith("</b>"):
-        return
-
     final_text = text_to_check
 
-    # Saare rules ko replace karein
+    # Saare rules ko ek-ek karke replace karein
     for old_txt, new_txt in REPLACEMENT_RULES.items():
         if re.search(old_txt, final_text, re.IGNORECASE):
             pattern = re.compile(old_txt, re.IGNORECASE)
             final_text = pattern.sub(new_txt, final_text)
 
+    # Pure message ko BOLD format me convert karein
     bold_text = f"<b>{final_text}</b>"
 
     try:
         if msg.caption:
+            if msg.caption_html == bold_text:
+                return
             await context.bot.edit_message_caption(
                 chat_id=msg.chat_id,
                 message_id=msg.message_id,
@@ -60,15 +57,17 @@ async def edit_channel_caption(update: Update, context: ContextTypes.DEFAULT_TYP
                 parse_mode="HTML"
             )
         elif msg.text:
+            if msg.text_html == bold_text:
+                return
             await context.bot.edit_message_text(
                 chat_id=msg.chat_id,
                 message_id=msg.message_id,
                 text=bold_text,
                 parse_mode="HTML"
             )
-        print("Success!")
+        print("Successfully Replaced and Bolded!")
     except Exception as e:
-        print(f"Log: {e}")
+        print(f"Edit log/status: {e}")
 
 # 3. Dynamic Commands
 async def add_rule(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -96,12 +95,12 @@ async def del_rule(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def clear_rules(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global REPLACEMENT_RULES
     REPLACEMENT_RULES.clear()
-    await update.message.reply_text("🧹 Cleared!")
+    await update.message.reply_text("🧹 Saare rules clear ho gaye!")
 
 async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global REPLACEMENT_RULES
     if not REPLACEMENT_RULES:
-        await update.message.reply_text("📊 No Active Rules.")
+        await update.message.reply_text("📊 Kuch bhi set nahi hai, bot sirf bold karega.")
         return
     status_msg = "📊 <b>Active Rules:</b>\n\n"
     for old, new in REPLACEMENT_RULES.items():
@@ -112,7 +111,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Hyy Bhai! Bot active hai.\n/addrule\n/delrule\n/clear\n/status", parse_mode="HTML")
 
 def main():
+    # Yeh purane original code ka setup hai jo Render par live chal raha tha
     threading.Thread(target=start_dummy_server, daemon=True).start()
+    
     TOKEN = os.environ.get("BOT_TOKEN")
     app = ApplicationBuilder().token(TOKEN).build()
     
@@ -121,8 +122,10 @@ def main():
     app.add_handler(CommandHandler("delrule", del_rule))
     app.add_handler(CommandHandler("clear", clear_rules))
     app.add_handler(CommandHandler("status", status))
+    
     app.add_handler(MessageHandler(filters.ChatType.CHANNEL, edit_channel_caption))
     
+    print("Bot is polling successfully...")
     app.run_polling()
 
 if __name__ == '__main__':
