@@ -1,35 +1,45 @@
-import os
 import asyncio
+import os
+import http.server
+import socketserver
+import threading
 from telegram import Update
-from telegram.ext import Application, MessageHandler, filters, ContextTypes
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
-TOKEN = os.environ.get("BOT_TOKEN")
+# 1. Render ko khush rakhne ke liye chota sa web server
+def start_dummy_server():
+    PORT = int(os.environ.get("PORT", 10000))
+    Handler = http.server.SimpleHTTPRequestHandler
+    try:
+        with socketserver.TCPServer(("", PORT), Handler) as httpd:
+            print(f"Dummy server running on port {PORT}")
+            httpd.serve_forever()
+    except Exception as e:
+        print(f"Server error: {e}")
 
-async def replace_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.message and update.message.text:
-        original_text = update.message.text
-        
-        # Yahan aap apna badalne wala shabd badal sakte ho
-        modified_text = original_text.replace("Apple", "Orange")
-        
-        if original_text != modified_text:
-            await update.message.reply_text(f"Edited: {modified_text}")
+# 2. Bot ka Start Command (Aapka main bot logic)
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Hyy Bhai! Auto Caption Editor Bot active hai. Kaise madad karu?")
 
 def main():
-    if not TOKEN:
-        print("Error: BOT_TOKEN environment variable not set!")
-        return
-        
-    # Python 3.14 ke event loop error ko theek karne ke liye:
-    try:
-        loop = asyncio.get_event_loop()
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        
-    app = Application.builder().token(TOKEN).build()
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, replace_text))
-    print("Bot is starting up...")
+    # Background me server chalu karein
+    threading.Thread(target=start_dummy_server, daemon=True).start()
+
+    # Asyncio Loop error ko theek karne ke liye
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    
+    # Render se automatic token uthane ke liye
+    TOKEN = os.environ.get("BOT_TOKEN")
+    
+    # Bot Application build karein
+    app = ApplicationBuilder().token(TOKEN).build()
+    
+    # Start command handler jodna
+    app.add_handler(CommandHandler("start", start))
+    
+    # Bot shuru karein
+    print("Bot is polling...")
     app.run_polling()
 
 if __name__ == '__main__':
