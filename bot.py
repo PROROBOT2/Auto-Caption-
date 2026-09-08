@@ -17,7 +17,7 @@ def start_dummy_server():
     except Exception:
         pass
 
-# ⚠️ MULTIPLE TEXT STORAGE (Aapki list)
+# ⚠️ MULTIPLE TEXT STORAGE
 REPLACEMENT_RULES = {
     "MovieHub": "DG_Contents",
     "JoinUs": "SubscribeNow"
@@ -37,13 +37,12 @@ async def edit_channel_caption(update: Update, context: ContextTypes.DEFAULT_TYP
 
     final_text = text_to_check
 
-    # Saare rules ko ek-ek karke replace karein
+    # Replacement loop
     for old_txt, new_txt in REPLACEMENT_RULES.items():
         if re.search(old_txt, final_text, re.IGNORECASE):
             pattern = re.compile(old_txt, re.IGNORECASE)
             final_text = pattern.sub(new_txt, final_text)
 
-    # Pure message ko BOLD format me convert karein
     bold_text = f"<b>{final_text}</b>"
 
     try:
@@ -65,9 +64,9 @@ async def edit_channel_caption(update: Update, context: ContextTypes.DEFAULT_TYP
                 text=bold_text,
                 parse_mode="HTML"
             )
-        print("Successfully Replaced and Bolded!")
+        print("Success!")
     except Exception as e:
-        print(f"Edit log/status: {e}")
+        print(f"Log: {e}")
 
 # 3. Dynamic Commands
 async def add_rule(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -95,12 +94,12 @@ async def del_rule(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def clear_rules(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global REPLACEMENT_RULES
     REPLACEMENT_RULES.clear()
-    await update.message.reply_text("🧹 Saare rules clear ho gaye!")
+    await update.message.reply_text("🧹 Cleared!")
 
 async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global REPLACEMENT_RULES
     if not REPLACEMENT_RULES:
-        await update.message.reply_text("📊 Kuch bhi set nahi hai, bot sirf bold karega.")
+        await update.message.reply_text("📊 No Active Rules.", parse_mode="HTML")
         return
     status_msg = "📊 <b>Active Rules:</b>\n\n"
     for old, new in REPLACEMENT_RULES.items():
@@ -110,10 +109,17 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Hyy Bhai! Bot active hai.\n/addrule\n/delrule\n/clear\n/status", parse_mode="HTML")
 
+# Render ke new environment ke liye custom wrapper function
 def main():
-    # Yeh purane original code ka setup hai jo Render par live chal raha tha
     threading.Thread(target=start_dummy_server, daemon=True).start()
     
+    # Render ke Event Loop issue ko root se khatam karne ke liye loop initialization
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
     TOKEN = os.environ.get("BOT_TOKEN")
     app = ApplicationBuilder().token(TOKEN).build()
     
@@ -122,10 +128,9 @@ def main():
     app.add_handler(CommandHandler("delrule", del_rule))
     app.add_handler(CommandHandler("clear", clear_rules))
     app.add_handler(CommandHandler("status", status))
-    
     app.add_handler(MessageHandler(filters.ChatType.CHANNEL, edit_channel_caption))
     
-    print("Bot is polling successfully...")
+    print("Bot is polling cleanly...")
     app.run_polling()
 
 if __name__ == '__main__':
