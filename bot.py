@@ -4,10 +4,11 @@ import http.server
 import socketserver
 import threading
 import re
+import html
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, MessageHandler, filters
 
-# 1. Render Dummy Server
+# 1. Render Dummy Server (Port binding active rakhne ke liye)
 def start_dummy_server():
     PORT = int(os.environ.get("PORT", 10000))
     Handler = http.server.SimpleHTTPRequestHandler
@@ -17,102 +18,140 @@ def start_dummy_server():
     except Exception:
         pass
 
-# ⚠️ DYNAMIC TEXT STORAGE (Default values)
-# Jab tak aap Telegram par change nahi karoge, ye values kaam karengi
-OLD_TEXT = "TvShowHub"
+# ⚠️ STATIC IN-MEMORY STORAGE (Bina Database Ke Setup)
+# Bot restart hone par ye wapas initial values par reset ho jayega
+OLD_TEXTS_LIST = ["Old_Channel_Link"]
 NEW_TEXT = "DG_Contents"
 
-# 2. Heavy Duty Channel Editor Logic (With Auto-Bold)
+# 2. Channel Editor Logic (Multiple Text + Loop Protection)
 async def edit_channel_caption(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global OLD_TEXT, NEW_TEXT
+    global OLD_TEXTS_LIST, NEW_TEXT
     
     msg = update.channel_post or update.edited_channel_post
     if not msg:
         return
 
-    # Check karein ki text message hai ya koi media caption hai
-    # Telegram markdown/entities ko hatakar plain text nikalne ke liye update.message ke text/caption formats use hote hain
     text_to_check = msg.text or msg.caption
     if not text_to_check:
         return
 
-    # 1. Pehle text replace karein (Case-Insensitive)
-    if re.search(OLD_TEXT, text_to_check, re.IGNORECASE):
-        pattern = re.compile(OLD_TEXT, re.IGNORECASE)
-        final_text = pattern.sub(NEW_TEXT, text_to_check)
-    else:
-        final_text = text_to_check
+    # 🛑 LOOP PROTECTION: Agar message pehle se hi bold format HTML tags me hai, toh skip karein
+    if text_to_check.startswith("<b>") and text_to_check.endswith("</b>"):
+        return
 
-    # 2. pure message ko BOLD format me convert karein (HTML tag ke sath)
-    bold_text = f"<b>{final_text}</b>"
+    has_match = False
+    final_text = text_to_check
+
+    # List ke har word ko check aur replace karein (Case-Insensitive)
+    for old_txt in OLD_TEXTS_LIST:
+        if re.search(re.escape(old_txt), final_text, re.IGNORECASE):
+            pattern = re.compile(re.escape(old_txt), re.IGNORECASE)
+            final_text = pattern.sub(NEW_TEXT, final_text)
+            has_match = True
+
+    # Agar text me koi badlav nahi hua aur message pehle se edited notification hai, toh skip karein
+    if not has_match and update.edited_channel_post:
+        return
+
+    # HTML special characters escape karein taaki tags break na hon
+    safe_text = html.escape(final_text)
+    bold_text = f"<b>{safe_text}</b>"
 
     try:
         if msg.caption:
-            # Agar photo/video ka caption hai
             await context.bot.edit_message_caption(
-                chat_id=msg.chat_id,
-                message_id=msg.message_id,
-                caption=bold_text,
-                parse_mode="HTML" # HTML parse mode bold karne ke liye zaroori hai
-            )
-        elif msg.text:
-            # Agar sirf normal text message hai
-            await context.bot.edit_message_text(
-                chat_id=msg.chat_id,
-                message_id=msg.message_id,
-                text=bold_text,
+                chat_id=msg.chat_id, 
+                message_id=msg.message_id, 
+                caption=bold_text, 
                 parse_mode="HTML"
             )
-        print("Successfully Replaced and Bolded!")
+        elif msg.text:
+            await context.bot.edit_message_text(
+                chat_id=msg.chat_id, 
+                message_id=msg.message_id, 
+                text=bold_text, 
+                parse_mode="HTML"
+            )
+        print("Successfully Replaced Multiple Words and Bolded!")
     except Exception as e:
-        print(f"Edit failed: {e}")
+        print(f"Edit failed (Check Admin Rights): {e}")
 
-# 3. Dynamic Commands (Sirf Aapke use ke liye)
-async def set_old(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global OLD_TEXT
+# 3. Dynamic Commands Setup
+async def add_old(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global OLD_TEXTS_LIST
     if not context.args:
-        await update.message.reply_text("❌ Sahi tarika: /setold [purana_text]\nExample: /setold TvShowHub")
+        await update.message.reply_text("❌ Sahi tarika: /addold [word]\nExample: /addold Old_Channel_Link")
         return
-    OLD_TEXT = " ".join(context.args)
-    await update.message.reply_text(f"✅ Ab se bot channel me <b>{OLD_TEXT}</b> ko dhoondhega.", parse_mode="HTML")
+    new_word = " ".join(context.args)
+    
+    if new_word in OLD_TEXTS_LIST:
+        await update.message.reply_text("ℹ️ Yeh word pehle se hi list me hai.")
+        return
+        
+    OLD_TEXTS_LIST.append(new_word)
+    await update.message.reply_text(f"✅ <b>{html.escape(new_word)}</b> ko list me jod diya gaya hai.", parse_mode="HTML")
+
+async def del_old(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global OLD_TEXTS_LIST
+    if not context.args:
+        await update.message.reply_text("❌ Sahi tarika: /delold [word]\nExample: /delold Old_Channel_Link")
+        return
+    word_to_del = " ".join(context.args)
+    
+    if word_to_del not in OLD_TEXTS_LIST:
+        await update.message.reply_text("❌ Yeh word list me nahi mila.")
+        return
+        
+    OLD_TEXTS_LIST.remove(word_to_del)
+    await update.message.reply_text(f"🗑️ <b>{html.escape(word_to_del)}</b> ko list se hata diya gaya hai.", parse_mode="HTML")
 
 async def set_new(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global NEW_TEXT
     if not context.args:
-        await update.message.reply_text("❌ Sahi tarika: /setnew [naya_text]\nExample: /setnew DG_Contents")
+        await update.message.reply_text("❌ Sahi tarika: /setnew [text]\nExample: /setnew YourBrandName")
         return
     NEW_TEXT = " ".join(context.args)
-    await update.message.reply_text(f"✅ Ab se bot use badal kar <b>{NEW_TEXT}</b> kar dega.", parse_mode="HTML")
+    await update.message.reply_text(f"✅ Ab se bot sabhi purane words ko badal kar <b>{html.escape(NEW_TEXT)}</b> kar dega.", parse_mode="HTML")
 
 async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global OLD_TEXT, NEW_TEXT
+    global OLD_TEXTS_LIST, NEW_TEXT
+    
+    words_str = "\n".join([f"- <code>{html.escape(w)}</code>" for w in OLD_TEXTS_LIST]) if OLD_TEXTS_LIST else "<i>List Khali Hai</i>"
+    
     await update.message.reply_text(
-        f"📊 <b>Current Settings:</b>\n\n🔍 Search for: <code>{OLD_TEXT}</code>\n✏️ Replace with: <code>{NEW_TEXT}</code>", 
+        f"📊 <b>Current Settings:</b>\n\n"
+        f"🔍 <b>Search for (Multiple Words):</b>\n{words_str}\n\n"
+        f"✏️ <b>Replace with:</b> <code>{html.escape(NEW_TEXT)}</code>", 
         parse_mode="HTML"
     )
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Hyy Bhai! Bot active hai.\n\nCommands:\n/setold - Purana text set karein\n/setnew - Naya text set karein\n/status - Current settings check karein")
+    unique_welcome = (
+        "⚡ <b>Auto Caption Editor Engine v2.0</b> ⚡\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "Hey Boss! Main active hu aur aapke channels ka branding control sambhalne ke liye bilkul taiyar hu.\n\n"
+        "⚙️ <b>Control Panel Commands:</b>\n"
+        "• /addold [word] ➔ Naya purana text/link list me jodein\n"
+        "• /delold [word] ➔ List se koi word hatayein\n"
+        "• /setnew [word] ➔ Apni nayi brand identity set karein\n"
+        "• /status        ➔ Pure configurations check karein\n\n"
+        "📢 <i>Note: Mujhe channel me admin banakar 'Edit Messages' ki permission dena mat bhoolna!</i>"
+    )
+    await update.message.reply_text(unique_welcome, parse_mode="HTML")
 
 def main():
     threading.Thread(target=start_dummy_server, daemon=True).start()
-
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    
     TOKEN = os.environ.get("BOT_TOKEN")
     app = ApplicationBuilder().token(TOKEN).build()
     
-    # Handlers
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("setold", set_old))
+    app.add_handler(CommandHandler("addold", add_old))
+    app.add_handler(CommandHandler("delold", del_old))
     app.add_handler(CommandHandler("setnew", set_new))
     app.add_handler(CommandHandler("status", status))
-    
-    # Channel message handler
     app.add_handler(MessageHandler(filters.ChatType.CHANNEL, edit_channel_caption))
     
-    print("Bot is polling with Advanced features...")
+    print("Bot is running perfectly without database...")
     app.run_polling()
 
 if __name__ == '__main__':
