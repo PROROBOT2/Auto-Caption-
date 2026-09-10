@@ -123,8 +123,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     keyboard = [
         [
-            InlineKeyboardButton("📢 Channel", url="https://t.me"),
-            InlineKeyboardButton("👥 Support", url="https://t.me")
+            InlineKeyboardButton("📢 Channel", url="https://t.me/DG_Contents"),
+            InlineKeyboardButton("👥 Support", url="https://t.me/dghelps_bot")
         ]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
