@@ -4,7 +4,7 @@ import http.server
 import socketserver
 import threading
 import re
-from telegram import Update
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, MessageHandler, filters
 
 # 1. Render Dummy Server
@@ -112,13 +112,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     welcome_text = (
         f"👋 <b>Welcome, {user_name}!</b>\n\n"
         f"🤖 <b>Auto Caption Bot v2.0</b> mein aapka swagat hai.\n\n"
-        f"⚡ <b>Commands List:</b>\n"
-        f"• /addrule - Naya replacement rule jodne ke liye\n"
-        f"• /delrule - Purana rule hatane ke liye\n"
-        f"• /clear - Saare rules clear karne ke liye\n"
-        f"• /status - Active rules dekhne ke liye\n\n"
-        f"📝 <b>How to use?</b>\n"
-        f"Bas channel mein video ya file dalo, baki ka kaam main khud kar dunga!"
+        f"<b>Commands List:</b>\n"
+        f"• <code>/addrule</code> - Naya replacement rule jodne ke liye\n"
+        f"• <code>/delrule</code> - Purana rule hatane ke liye\n"
+        f"• <code>/clear</code> - Saare rules clear karne ke liye\n"
+        f"• <code>/status</code> - Active rules dekhne ke liye\n\n"
+        f"📖 <b>How to use?</b>\n"
+        f"Bas channel mein video ya file dalo, baki ka kaam main khud kar dunga"
     )
     
     keyboard = [
