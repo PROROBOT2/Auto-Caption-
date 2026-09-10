@@ -107,7 +107,34 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(status_msg, parse_mode="HTML")
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Hyy Bhai! Bot active hai.\n/addrule\n/delrule\n/clear\n/status", parse_mode="HTML")
+    user_name = update.effective_user.first_name
+    
+    welcome_text = (
+        f"👋 <b>Welcome, {user_name}!</b>\n\n"
+        f"🤖 <b>Auto Caption Bot v2.0</b> mein aapka swagat hai.\n\n"
+        f"⚡ <b>Commands List:</b>\n"
+        f"• /addrule - Naya replacement rule jodne ke liye\n"
+        f"• /delrule - Purana rule hatane ke liye\n"
+        f"• /clear - Saare rules clear karne ke liye\n"
+        f"• /status - Active rules dekhne ke liye\n\n"
+        f"📝 <b>How to use?</b>\n"
+        f"Bas channel mein video ya file dalo, baki ka kaam main khud kar dunga!"
+    )
+    
+    keyboard = [
+        [
+            InlineKeyboardButton("📢 Channel", url="https://t.me"),
+            InlineKeyboardButton("👥 Support", url="https://t.me")
+        ]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await update.message.reply_text(
+        text=welcome_text, 
+        parse_mode='HTML', 
+        reply_markup=reply_markup
+    )
+
 
 # Render ke new environment ke liye custom wrapper function
 def main():
