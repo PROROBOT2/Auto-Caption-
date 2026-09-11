@@ -1,5 +1,13 @@
-import asyncio
 import os
+import sys
+
+# 🔥 DYNAMIC DEBUG LOGS (Render par root cause pakadne ke liye)
+print("==================================================")
+print("🚀 [DEBUG] Render ne bot.py file ko read aur run kar liya hai!")
+print(f"📂 [DEBUG] Current Directory Files: {os.listdir('.')}")
+print("==================================================")
+
+import asyncio
 import http.server
 import socketserver
 import threading
@@ -15,17 +23,25 @@ def start_dummy_server():
     try:
         with socketserver.TCPServer(("", PORT), Handler) as httpd:
             httpd.serve_forever()
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"⚠️ [DUMMY SERVER WARN] {e}")
 
 # 🗄️ MONGO DB CONNECTION SETUP
 MONGO_URI = os.environ.get("MONGO_URI")
 if not MONGO_URI:
     print("❌ Error: Render Config Vars me MONGO_URI nahi mila!")
-    exit(1)
+    sys.exit(1)
 
-# Cloud Database se connection setup
-db_client = MongoClient(MONGO_URI)
+print("📡 [DEBUG] MongoDB Connect karne ki koshish ho rahi hai...")
+try:
+    db_client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000)
+    # Connection test karne ke liye command run kar rahe hain
+    db_client.admin.command('ping')
+    print("✅ [DEBUG] MongoDB successfully connect ho gaya!")
+except Exception as mongo_err:
+    print(f"❌ MongoDB Connection Error: {mongo_err}")
+    sys.exit(1)
+
 db = db_client["AutoCaptionBotDB"]
 settings_col = db["bot_settings"]
 
@@ -37,20 +53,26 @@ def get_bot_settings():
         "custom_header": "",
         "custom_footer": "⚡️ Fast Download Links @DG_Contents"
     }
-    
-    config = settings_col.find_one({"_id": "config"})
-    if not config:
-        settings_col.insert_one(default_settings)
+    try:
+        config = settings_col.find_one({"_id": "config"})
+        if not config:
+            settings_col.insert_one(default_settings)
+            return default_settings
+        return config
+    except Exception as e:
+        print(f"⚠️ Settings load error: {e}")
         return default_settings
-    return config
 
 # Database me dynamic changes save karne ka helper function
 def update_bot_settings(field_name, field_value):
-    settings_col.update_one(
-        {"_id": "config"},
-        {"$set": {field_name: field_value}},
-        upsert=True
-    )
+    try:
+        settings_col.update_one(
+            {"_id": "config"},
+            {"$set": {field_name: field_value}},
+            upsert=True
+        )
+    except Exception as e:
+        print(f"⚠️ Settings update error: {e}")
 
 raw_log_id = os.environ.get("LOG_CHANNEL_ID")
 LOG_CHANNEL_ID = int(raw_log_id) if raw_log_id and raw_log_id.strip() else None
@@ -215,26 +237,4 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• <code>/clear</code> - Reset all database configurations\n\n"
         f"ℹ️ <i>Just add me to your channel as admin, I will handle the rest with supersonic speed.</i>"
     )
-    keyboard = [[InlineKeyboardButton("📢 Channel", url="https://t.me/DG_CONTENTS"),
-                 InlineKeyboardButton("👥 Support", url="https://t.me/DGHELPS_BOT")]]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text(text=welcome_text, parse_mode='HTML', reply_markup=reply_markup)
-
-def main():
-    threading.Thread(target=start_dummy_server, daemon=True).start()
-    try:
-        loop = asyncio.get_event_loop()
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        
-    TOKEN = os.environ.get("BOT_TOKEN")
-    
-    app = ApplicationBuilder().token(TOKEN).build()
-    
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("addrule", add_rule))
-    app.add_handler(CommandHandler("delrule", del_rule))
-    app.add_handler(CommandHandler("setfooter", set_footer))
-    app.add_handler(CommandHandler("setheader", set_header))
-    app.add_handler(CommandHandler("clear", clear_rules))
+    keyboard = [[InlineKeyboardButton("📢 Channel", url="https://t.me"),
