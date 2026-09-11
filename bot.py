@@ -5,7 +5,6 @@ import socketserver
 import threading
 import re
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-# Sahi imports: ContextTypes aur MessageHandler dono include hain
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
 from pymongo import MongoClient
 
@@ -204,10 +203,10 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_name = update.effective_user.first_name
     welcome_text = (
-        f"⚡️ <b>𝖶𝖾𝗅𝖼𝗈𝗆𝖾, {user_name}!</b>\n\n"
-        f"🚀 <b>Auto Caption Engine v3.0 [𝖯𝖱𝖮 + ☁️ MongoDB]</b>\n"
-        f"⚡ Status: <code>🟢 𝖮𝗇\u200bl𝗂𝗇𝖾 & Saved Permanent</code>\n\n"
-        f"🛠️ <b>𝖢𝖮𝖬𝖬𝖠𝖭𝖣𝖲 𝖢𝖤𝖭𝖳𝖤𝖱:</b>\n"
+        f"⚡️ <b>Welcome, {user_name}!</b>\n\n"
+        f"🚀 <b>Auto Caption Engine v3.0 [PRO + MongoDB]</b>\n"
+        f"⚡ Status: <code>🟢 Online & Saved Permanent</code>\n\n"
+        f"🛠️ <b>COMMANDS CENTER:</b>\n"
         f"• <code>/addrule</code> - Add text filter / replacement\n"
         f"• <code>/delrule</code> - Delete any active filter\n"
         f"• <code>/setheader</code> - Change top caption text\n"
@@ -216,7 +215,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• <code>/clear</code> - Reset all database configurations\n\n"
         f"ℹ️ <i>Just add me to your channel as admin, I will handle the rest with supersonic speed.</i>"
     )
-    keyboard = [[InlineKeyboardButton("📢 Channel", url="https://t.me/DG_Contents"),
+    keyboard = [[InlineKeyboardButton("📢 Channel", url="https://t.me/DG_CONTENTS"),
                  InlineKeyboardButton("👥 Support", url="https://t.me/DGHELPS_BOT")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
     await update.message.reply_text(text=welcome_text, parse_mode='HTML', reply_markup=reply_markup)
@@ -237,3 +236,5 @@ def main():
     app.add_handler(CommandHandler("addrule", add_rule))
     app.add_handler(CommandHandler("delrule", del_rule))
     app.add_handler(CommandHandler("setfooter", set_footer))
+    app.add_handler(CommandHandler("setheader", set_header))
+    app.add_handler(CommandHandler("clear", clear_rules))
