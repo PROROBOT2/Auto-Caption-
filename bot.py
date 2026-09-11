@@ -5,7 +5,8 @@ import socketserver
 import threading
 import re
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextType, filters
+# Sahi imports: ContextTypes aur MessageHandler dono include hain
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
 from pymongo import MongoClient
 
 # 1. Render Dummy Server (Bot ko 24x7 online rakhne ke liye)
@@ -57,7 +58,6 @@ LOG_CHANNEL_ID = int(raw_log_id) if raw_log_id and raw_log_id.strip() else None
 
 # 2. Premium Channel Editor & Auto-Cleaner Logic
 async def edit_channel_caption(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Har post aane par DB se live settings pull hogi
     config = get_bot_settings()
     replacement_rules = config.get("replacement_rules", {})
     custom_header = config.get("custom_header", "")
@@ -141,7 +141,6 @@ async def add_rule(update: Update, context: ContextTypes.DEFAULT_TYPE):
         old_part, new_part = raw_args.split(" -> ", 1)
         rules[old_part.strip()] = new_part.strip()
         
-        # MongoDB me save kiya
         update_bot_settings("replacement_rules", rules)
         await update.message.reply_text("✅ <b>Success:</b> Replacement rule successfully active and saved to MongoDB!", parse_mode="HTML")
     except Exception:
@@ -155,7 +154,6 @@ async def del_rule(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if old_text in rules:
         del rules[old_text]
         
-        # MongoDB me updated rules save kiye
         update_bot_settings("replacement_rules", rules)
         await update.message.reply_text("🗑️ <b>Success:</b> Rule deleted successfully from MongoDB.", parse_mode="HTML")
     else:
@@ -208,7 +206,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     welcome_text = (
         f"⚡️ <b>𝖶𝖾𝗅𝖼𝗈𝗆𝖾, {user_name}!</b>\n\n"
         f"🚀 <b>Auto Caption Engine v3.0 [𝖯𝖱𝖮 + ☁️ MongoDB]</b>\n"
-        f"⚡ 𝖲𝖺𝗎𝗌: <code>🟢 𝖮𝗇𝗅𝗂𝗇𝖾 & Saved Permanent</code>\n\n"
+        f"⚡ Status: <code>🟢 𝖮𝗇\u200bl𝗂𝗇𝖾 & Saved Permanent</code>\n\n"
         f"🛠️ <b>𝖢𝖮𝖬𝖬𝖠𝖭𝖣𝖲 𝖢𝖤𝖭𝖳𝖤𝖱:</b>\n"
         f"• <code>/addrule</code> - Add text filter / replacement\n"
         f"• <code>/delrule</code> - Delete any active filter\n"
@@ -218,8 +216,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• <code>/clear</code> - Reset all database configurations\n\n"
         f"ℹ️ <i>Just add me to your channel as admin, I will handle the rest with supersonic speed.</i>"
     )
-    keyboard = [[InlineKeyboardButton("📢 Channel", url="https://t.me/dg_contents"),
-                 InlineKeyboardButton("👥 Support", url="https://t.me/dghelps_bot")]]
+    keyboard = [[InlineKeyboardButton("📢 Channel", url="https://t.me/DG_Contents"),
+                 InlineKeyboardButton("👥 Support", url="https://t.me/DGHELPS_BOT")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
     await update.message.reply_text(text=welcome_text, parse_mode='HTML', reply_markup=reply_markup)
 
@@ -233,17 +231,9 @@ def main():
         
     TOKEN = os.environ.get("BOT_TOKEN")
     
-    # 🛠️ Version 21.10 ke liye sahi aur updated tarika:
     app = ApplicationBuilder().token(TOKEN).build()
     
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("addrule", add_rule))
     app.add_handler(CommandHandler("delrule", del_rule))
     app.add_handler(CommandHandler("setfooter", set_footer))
-    app.add_handler(CommandHandler("setheader", set_header))
-    app.add_handler(CommandHandler("clear", clear_rules))
-    app.add_handler(CommandHandler("status", status))
-    app.add_handler(MessageHandler(filters.ChatType.CHANNEL, edit_channel_caption))
-    
-    print("Bot is polling cleanly with MongoDB Integration...")
-    app.run_polling()
