@@ -128,7 +128,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_name = update.effective_user.first_name
     welcome_text = (
         f"👋 <b>Welcome, {user_name}!</b>\n\n"
-        f"🤖 <b>Auto Caption Bot v2.0</b> mein aapka swagat hai.\n\n"
+        f"🤖 <b>Auto Caption Bot v2.0</b> mein tera swagat hai.\n\n"
         f"<b>Commands List:</b>\n"
         f"• <code>/addrule</code> - Naya replacement rule jodne ke liye\n"
         f"• <code>/delrule</code> - Purana rule hatane ke liye\n"
@@ -137,8 +137,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"📖 <b>How to use?</b>\n"
         f"Bas channel mein video ya file dalo, baki ka kaam main khud kar dunga"
     )
-    keyboard = [[InlineKeyboardButton("📢 Channel", url="https://t.me"),
-                 InlineKeyboardButton("👥 Support", url="https://t.me")]]
+    keyboard = [[InlineKeyboardButton("📢 Channel", url="https://t.me/DG_Contents"),
+                 InlineKeyboardButton("👥 Support", url="https://t.me/DGhelps_bot")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
     await update.message.reply_text(text=welcome_text, parse_mode='HTML', reply_markup=reply_markup)
 
