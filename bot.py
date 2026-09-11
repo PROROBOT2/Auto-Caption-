@@ -23,7 +23,11 @@ REPLACEMENT_RULES = {
     "JoinUs": "SubscribeNow"
 }
 
-# 2. Heavy Duty Channel Editor Logic
+# 📢 LOG CHANNEL ID (Render variable ko text se integer number mein convert karne ke liye fixes)
+raw_log_id = os.environ.get("LOG_CHANNEL_ID")
+LOG_CHANNEL_ID = int(raw_log_id) if raw_log_id and raw_log_id.strip() else None
+
+# 2. Heavy Duty Channel Editor & Logger Logic
 async def edit_channel_caption(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global REPLACEMENT_RULES
     
@@ -64,9 +68,23 @@ async def edit_channel_caption(update: Update, context: ContextTypes.DEFAULT_TYP
                 text=bold_text,
                 parse_mode="HTML"
             )
-        print("Success!")
+        print("Success: Caption Edited!")
+
+        # 🚀 LOG CHANNEL FORWARDING LOGIC
+        if LOG_CHANNEL_ID:
+            try:
+                # Yeh badle hue message ko aapke log channel mein copy kar dega
+                await context.bot.copy_message(
+                    chat_id=LOG_CHANNEL_ID,
+                    from_chat_id=msg.chat_id,
+                    message_id=msg.message_id
+                )
+                print("Success: Message logged to channel!")
+            except Exception as log_error:
+                print(f"Log Channel Error: {log_error}")
+
     except Exception as e:
-        print(f"Log: {e}")
+        print(f"Main Error Log: {e}")
 
 # 3. Dynamic Commands
 async def add_rule(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -108,7 +126,6 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_name = update.effective_user.first_name
-    
     welcome_text = (
         f"👋 <b>Welcome, {user_name}!</b>\n\n"
         f"🤖 <b>Auto Caption Bot v2.0</b> mein aapka swagat hai.\n\n"
@@ -120,27 +137,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"📖 <b>How to use?</b>\n"
         f"Bas channel mein video ya file dalo, baki ka kaam main khud kar dunga"
     )
-    
-    keyboard = [
-        [
-            InlineKeyboardButton("📢 Channel", url="https://t.me/DG_Contents"),
-            InlineKeyboardButton("👥 Support", url="https://t.me/dghelps_bot")
-        ]
-    ]
+    keyboard = [[InlineKeyboardButton("📢 Channel", url="https://t.me"),
+                 InlineKeyboardButton("👥 Support", url="https://t.me")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    await update.message.reply_text(
-        text=welcome_text, 
-        parse_mode='HTML', 
-        reply_markup=reply_markup
-    )
+    await update.message.reply_text(text=welcome_text, parse_mode='HTML', reply_markup=reply_markup)
 
-
-# Render ke new environment ke liye custom wrapper function
 def main():
     threading.Thread(target=start_dummy_server, daemon=True).start()
-    
-    # Render ke Event Loop issue ko root se khatam karne ke liye loop initialization
     try:
         loop = asyncio.get_event_loop()
     except RuntimeError:
