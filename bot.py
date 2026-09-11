@@ -9,7 +9,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
 from pymongo import MongoClient
 
-# 1. Render Dummy Server
+# 1. Render Dummy Server (Keep Alive 24/7)
 def start_dummy_server():
     PORT = int(os.environ.get("PORT", 10000))
     Handler = http.server.SimpleHTTPRequestHandler
@@ -19,7 +19,7 @@ def start_dummy_server():
     except Exception:
         pass
 
-# MONGO DB SETUP
+# MONGO DB CONFIGURATION
 MONGO_URI = os.environ.get("MONGO_URI")
 if not MONGO_URI:
     sys.exit(1)
@@ -38,7 +38,7 @@ def get_bot_settings():
         "_id": "config",
         "replacement_rules": {"MovieHub": "DG_Contents", "JoinUs": "SubscribeNow"},
         "custom_header": "",
-        "custom_footer": "⚡️ Fast Download Links @DG_Contents"
+        "custom_footer": "⚡ Fast Download Links @DG_Contents"
     }
     try:
         config = settings_col.find_one({"_id": "config"})
@@ -58,7 +58,7 @@ def update_bot_settings(field_name, field_value):
 raw_log_id = os.environ.get("LOG_CHANNEL_ID")
 LOG_CHANNEL_ID = int(raw_log_id) if raw_log_id and raw_log_id.strip() else None
 
-# 2. Caption Editor Logic
+# 2. Premium Auto-Cleaner & Caption Editor Logic
 async def edit_channel_caption(update: Update, context: ContextTypes.DEFAULT_TYPE):
     config = get_bot_settings()
     replacement_rules = config.get("replacement_rules", {})
@@ -72,9 +72,12 @@ async def edit_channel_caption(update: Update, context: ContextTypes.DEFAULT_TYP
     if not text_to_check: return
 
     final_text = text_to_check
+    
+    # 🛑 AUTOMATIC SPAM REMOVER PATTERN
     final_text = re.sub(r'(https?://)?t\.me/(?!DG_Contents|dghelps_bot)[a-zA-Z0-9_]+', '', final_text)
     final_text = re.sub(r'@(?!DG_Contents|dghelps_bot)[a-zA-Z0-9_]+', '', final_text)
 
+    # 🔍 FILTER REPLACEMENT LOOP
     for old_txt, new_txt in replacement_rules.items():
         if re.search(old_txt, final_text, re.IGNORECASE):
             final_text = re.compile(old_txt, re.IGNORECASE).sub(new_txt, final_text)
@@ -97,7 +100,7 @@ async def edit_channel_caption(update: Update, context: ContextTypes.DEFAULT_TYP
     except Exception:
         pass
 
-# 3. Admin Commands
+# 3. Dynamic Admin Commands Setup
 async def add_rule(update: Update, context: ContextTypes.DEFAULT_TYPE):
     config = get_bot_settings()
     rules = config.get("replacement_rules", {})
@@ -109,7 +112,7 @@ async def add_rule(update: Update, context: ContextTypes.DEFAULT_TYPE):
         old_part, new_part = raw_args.split(" -> ", 1)
         rules[old_part.strip()] = new_part.strip()
         update_bot_settings("replacement_rules", rules)
-        await update.message.reply_text("✅ Rule active and saved to MongoDB!", parse_mode="HTML")
+        await update.message.reply_text("✅ <b>Success:</b> Rule permanently synchronized to cloud database.", parse_mode="HTML")
     except Exception: pass
 
 async def del_rule(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -119,34 +122,68 @@ async def del_rule(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if old_text in rules:
         del rules[old_text]
         update_bot_settings("replacement_rules", rules)
-        await update.message.reply_text("🗑️ Rule deleted from MongoDB.", parse_mode="HTML")
+        await update.message.reply_text("🗑️ <b>Success:</b> Rule removed from cloud database.", parse_mode="HTML")
     else:
-        await update.message.reply_text("❌ word nahi mila.", parse_mode="HTML")
+        await update.message.reply_text("❌ <b>Error:</b> Targeted filter rule not active.", parse_mode="HTML")
 
 async def set_footer(update: Update, context: ContextTypes.DEFAULT_TYPE):
     footer_text = " ".join(context.args).strip()
     update_bot_settings("custom_footer", footer_text)
-    await update.message.reply_text(f"📝 Footer Set:\n<code>{footer_text}</code>", parse_mode="HTML")
+    await update.message.reply_text(f"📝 <b>Global Footer Set:</b>\n<code>{footer_text}</code>", parse_mode="HTML")
 
 async def set_header(update: Update, context: ContextTypes.DEFAULT_TYPE):
     header_text = " ".join(context.args).strip()
     update_bot_settings("custom_header", header_text)
-    await update.message.reply_text(f"📝 Header Set:\n<code>{header_text}</code>", parse_mode="HTML")
+    await update.message.reply_text(f"📝 <b>Global Header Set:</b>\n<code>{header_text}</code>", parse_mode="HTML")
 
 async def clear_rules(update: Update, context: ContextTypes.DEFAULT_TYPE):
     update_bot_settings("replacement_rules", {})
-    await update.message.reply_text("🧹 Saare rules MongoDB se clear ho gaye!", parse_mode="HTML")
+    await update.message.reply_text("🧹 <b>Database Reset:</b> All rules flushed out successfully.", parse_mode="HTML")
 
+# 🔥 1. HIGH-END CORE MONITORING DASHBOARD (/status)
 async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     config = get_bot_settings()
     replacement_rules = config.get("replacement_rules", {})
-    status_msg = f"⚙️ <b>𝖯𝖱𝖮 𝖡𝖮𝖲𝖲 𝖣𝖠𝖲𝖧𝖡𝖮𝖠𝖱𝖣</b>\n\n📡 MongoDB: Connected\n📢 Rules Active: {len(replacement_rules)}"
+    custom_header = config.get("custom_header", "")
+    custom_footer = config.get("custom_footer", "")
+    
+    status_msg = (
+        "⚙️ <b><u>AUTOMATION SYSTEM DIAGNOSTICS</u></b>\n\n"
+        f"🌐 <b>Database Status:</b> <code>🟢 MongoDB Connected</code>\n"
+        f"📢 <b>Log Sync Status:</b> <code>{'🟢 Active' if LOG_CHANNEL_ID else '🔴 Inactive'}</code>\n\n"
+        f"▪️ <b>Global Header:</b>\n<code>{custom_header if custom_header else '[Not Defined]'}</code>\n\n"
+        f"▪️ <b>Global Footer:</b>\n<code>{custom_footer if custom_footer else '[Not Defined]'}</code>\n\n"
+        f"📊 <b>Active Filters Matrix ({len(replacement_rules)} rules loaded):</b>\n"
+    )
+    
+    if not replacement_rules:
+        status_msg += "<code>[No active filter matrices currently loaded in database]</code>"
+    else:
+        for idx, (old, new) in enumerate(replacement_rules.items(), start=1):
+            status_msg += f" {idx:02d} • <code>{old}</code> ⚡️ <code>{new if new else '[FLUSHED]'}</code>\n"
+            
     await update.message.reply_text(status_msg, parse_mode="HTML")
 
+# 🔥 2. PREMIUM MINIMALIST SAAS START MESSAGE (/start)
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_name = update.effective_user.first_name
-    welcome_text = f"⚡️ <b>Welcome, {user_name}!</b>\n\n🚀 Auto Caption Bot Online & MongoDB Saved!\n\nUse <code>/status</code> to check configuration."
-    keyboard = [[InlineKeyboardButton("📢 Channel", url="https://t.me"), InlineKeyboardButton("👥 Support", url="https://t.me")]]
+    welcome_text = (
+        f"⚡️ <b>Welcome back, {user_name}!</b>\n\n"
+        f"🤖 <b>ENGINE:</b> <code>Auto Caption System v3.0 [PRO]</code>\n"
+        f"📡 <b>STATUS:</b> <code>🟢 System Online & Active</code>\n\n"
+        f"🛠 <b><u>SYSTEM CONTROL TERMINAL:</u></b>\n\n"
+        f"• <code>/addrule [x -> y]</code> ➔ Register new text replacement filter\n"
+        f"• <code>/delrule [word]</code> ➔ Wipe out specific filter target\n"
+        f"• <code>/setheader [text]</code> ➔ Define dynamic upper block formatting\n"
+        f"• <code>/setfooter [text]</code> ➔ Define permanent signature block attachment\n"
+        f"• <code>/status</code> ➔ Open real-time core monitoring dashboard\n"
+        f"• <code>/clear</code> ➔ Complete database initialization reset\n\n"
+        f"ℹ️ <i>Configuration Hint: Simply appoint me as an administrator in your channel. Supersonic filtering engine is fully active by default.</i>"
+    )
+    keyboard = [[
+        InlineKeyboardButton("📢 Channel", url="https://t.me/dg_contents"), 
+        InlineKeyboardButton("👥 Support", url="https://t.me/dghelps_bot")
+    ]]
     await update.message.reply_text(text=welcome_text, parse_mode='HTML', reply_markup=InlineKeyboardMarkup(keyboard))
 
 def main():
