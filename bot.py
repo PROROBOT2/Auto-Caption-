@@ -5,7 +5,7 @@ import socketserver
 import threading
 import re
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, MessageHandler, filters
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextType, filters
 from pymongo import MongoClient
 
 # 1. Render Dummy Server (Bot ko 24x7 online rakhne ke liye)
@@ -232,8 +232,18 @@ def main():
         asyncio.set_event_loop(loop)
         
     TOKEN = os.environ.get("BOT_TOKEN")
+    
+    # 🛠️ Version 21.10 ke liye sahi aur updated tarika:
     app = ApplicationBuilder().token(TOKEN).build()
     
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("addrule", add_rule))
     app.add_handler(CommandHandler("delrule", del_rule))
+    app.add_handler(CommandHandler("setfooter", set_footer))
+    app.add_handler(CommandHandler("setheader", set_header))
+    app.add_handler(CommandHandler("clear", clear_rules))
+    app.add_handler(CommandHandler("status", status))
+    app.add_handler(MessageHandler(filters.ChatType.CHANNEL, edit_channel_caption))
+    
+    print("Bot is polling cleanly with MongoDB Integration...")
+    app.run_polling()
