@@ -51,7 +51,7 @@ def start_dummy_server():
 
     try:
         with socketserver.TCPServer(("", PORT), Handler) as httpd:
-            logger.info(f"ðŸŒ Dummy server started on port {PORT}")
+            logger.info(f"\U0001f310 Dummy server started on port {PORT}")
             httpd.serve_forever()
 
     except Exception as e:
@@ -65,7 +65,7 @@ def start_dummy_server():
 MONGO_URI = os.environ.get("MONGO_URI")
 
 if not MONGO_URI:
-    logger.error("âŒ MONGO_URI environment variable missing.")
+    logger.error("\u274c MONGO_URI environment variable missing.")
     sys.exit(1)
 
 
@@ -78,7 +78,7 @@ try:
     db_client.admin.command("ping")
 
 except Exception as e:
-    logger.error(f"âŒ MongoDB connection failed: {e}")
+    logger.error(f"\u274c MongoDB connection failed: {e}")
     sys.exit(1)
 
 
@@ -207,7 +207,7 @@ async def edit_with_retry(edit_func, *args, **kwargs):
             last_error = exc
             wait_time = float(exc.retry_after) + 0.2
             logger.warning(
-                f"â³ Telegram rate limit; retrying in {wait_time:.1f}s "
+                f"\u23f3 Telegram rate limit; retrying in {wait_time:.1f}s "
                 f"(attempt {attempt}/{MAX_EDIT_RETRIES})"
             )
             await asyncio.sleep(wait_time)
@@ -216,7 +216,7 @@ async def edit_with_retry(edit_func, *args, **kwargs):
             last_error = exc
             wait_time = min(0.5 * (2 ** (attempt - 1)), 4.0)
             logger.warning(
-                f"ðŸŒ Temporary Telegram/network error; retrying in "
+                f"\U0001f310 Temporary Telegram/network error; retrying in "
                 f"{wait_time:.1f}s (attempt {attempt}/{MAX_EDIT_RETRIES}): {exc}"
             )
             await asyncio.sleep(wait_time)
@@ -290,7 +290,7 @@ def default_channel_config(channel_id):
 
         "custom_header": "",
 
-        "custom_footer": "âš¡ï¸ Fast Download Links @DG_Contents",
+        "custom_footer": "\u26a1\ufe0f Fast Download Links @DG_Contents",
     }
 
 
@@ -323,7 +323,7 @@ def get_channel_config(channel_id):
     except Exception as e:
 
         logger.error(
-            f"âŒ MongoDB get channel config error: {e}"
+            f"\u274c MongoDB get channel config error: {e}"
         )
 
         return default_channel_config(
@@ -361,7 +361,7 @@ def update_channel_config(
     except Exception as e:
 
         logger.error(
-            f"âŒ MongoDB update error: {e}"
+            f"\u274c MongoDB update error: {e}"
         )
     finally:
         invalidate_channel_config_cache(channel_id)
@@ -391,7 +391,7 @@ def get_selected_channel(user_id):
     except Exception as e:
 
         logger.error(
-            f"âŒ User settings error: {e}"
+            f"\u274c User settings error: {e}"
         )
 
         return None
@@ -424,7 +424,7 @@ def set_selected_channel(
     except Exception as e:
 
         logger.error(
-            f"âŒ Selected channel update failed: {e}"
+            f"\u274c Selected channel update failed: {e}"
         )
 
         return False
@@ -457,7 +457,7 @@ def user_owns_channel(
     except Exception as e:
 
         logger.error(
-            f"âŒ Ownership check failed: {e}"
+            f"\u274c Ownership check failed: {e}"
         )
 
         return False
@@ -484,7 +484,7 @@ def get_user_channels(user_id):
     except Exception as e:
 
         logger.error(
-            f"âŒ Getting user channels failed: {e}"
+            f"\u274c Getting user channels failed: {e}"
         )
 
         return []
@@ -525,7 +525,7 @@ async def handle_bot_channel_status(
     channel_id = chat.id
 
     logger.info(
-        f"ðŸ“¡ Channel membership update | "
+        f"\U0001f4e1 Channel membership update | "
         f"Channel: {channel_id} | "
         f"Old: {old_status} | "
         f"New: {new_status} | "
@@ -553,7 +553,7 @@ async def handle_bot_channel_status(
             if bot_member.status != ChatMemberStatus.ADMINISTRATOR:
 
                 logger.warning(
-                    f"âš ï¸ Bot is not admin in {channel_id}"
+                    f"\u26a0\ufe0f Bot is not admin in {channel_id}"
                 )
 
                 return
@@ -629,30 +629,30 @@ async def handle_bot_channel_status(
 
                 text=(
 
-                    "ðŸŽ‰ <b>CHANNEL CONNECTED!</b>\n\n"
+                    "\U0001f389 <b>CHANNEL CONNECTED!</b>\n\n"
 
-                    f"ðŸ“¢ <b>Channel:</b> "
+                    f"\U0001f4e2 <b>Channel:</b> "
                     f"<code>{html.escape(title or str(channel_id))}</code>\n\n"
 
-                    f"ðŸ†” <b>Channel ID:</b> "
+                    f"\U0001f194 <b>Channel ID:</b> "
                     f"<code>{channel_id}</code>\n\n"
 
-                    "â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”\n\n"
+                    "\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n\n"
 
-                    "âœ… <b>Connection Status:</b> ACTIVE\n\n"
+                    "\u2705 <b>Connection Status:</b> ACTIVE\n\n"
 
-                    "ðŸŽ¯ <b>Quick Commands:</b>\n\n"
+                    "\U0001f3af <b>Quick Commands:</b>\n\n"
 
-                    "â€¢ <code>/channels</code> â€” My Channels\n"
-                    "â€¢ <code>/usechannel ID</code> â€” Select Channel\n"
-                    "â€¢ <code>/addrule old -> new</code> â€” Add Rule\n"
-                    "â€¢ <code>/status</code> â€” Channel Status\n\n"
+                    "\u2022 <code>/channels</code> \u2014 My Channels\n"
+                    "\u2022 <code>/usechannel ID</code> \u2014 Select Channel\n"
+                    "\u2022 <code>/addrule old -> new</code> \u2014 Add Rule\n"
+                    "\u2022 <code>/status</code> \u2014 Channel Status\n\n"
 
-                    "ðŸ”’ <b>Important:</b>\n"
+                    "\U0001f512 <b>Important:</b>\n"
                     "Is channel ki rules/settings "
                     "<b>sirf isi channel</b> par apply hongi.\n\n"
 
-                    "ðŸ’¡ Multiple channels ke liye bot ko "
+                    "\U0001f4a1 Multiple channels ke liye bot ko "
                     "har channel mein admin bana sakte ho."
                 ),
 
@@ -661,7 +661,7 @@ async def handle_bot_channel_status(
 
 
             logger.info(
-                f"âœ… Channel connected: "
+                f"\u2705 Channel connected: "
                 f"{channel_id} "
                 f"owner={actor_user_id}"
             )
@@ -670,7 +670,7 @@ async def handle_bot_channel_status(
         except Exception as e:
 
             logger.error(
-                f"âŒ Channel connection failed: {e}"
+                f"\u274c Channel connection failed: {e}"
             )
 
 
@@ -699,14 +699,14 @@ async def handle_bot_channel_status(
             )
 
             logger.info(
-                f"ðŸ”´ Channel disconnected: "
+                f"\U0001f534 Channel disconnected: "
                 f"{channel_id}"
             )
 
         except Exception as e:
 
             logger.error(
-                f"âŒ Channel disconnect error: {e}"
+                f"\u274c Channel disconnect error: {e}"
             )
 
 
@@ -730,7 +730,7 @@ async def channels_command(
 
         await update.message.reply_text(
 
-            "ðŸ“­ <b>No Connected Channels</b>\n\n"
+            "\U0001f4ed <b>No Connected Channels</b>\n\n"
 
             "Pehle mujhe apne Telegram channel mein "
             "<b>Administrator</b> ke roop mein add karo.\n\n"
@@ -749,7 +749,7 @@ async def channels_command(
 
 
     message = (
-        "ðŸ“¢ <b>YOUR CONNECTED CHANNELS</b>\n\n"
+        "\U0001f4e2 <b>YOUR CONNECTED CHANNELS</b>\n\n"
     )
 
 
@@ -775,7 +775,7 @@ async def channels_command(
 
         selected_mark = (
 
-            " ðŸŸ¢ <b>SELECTED</b>"
+            " \U0001f7e2 <b>SELECTED</b>"
 
             if selected == channel_id
 
@@ -798,22 +798,22 @@ async def channels_command(
 
         message += (
 
-            f"{index}. ðŸ“¢ "
+            f"{index}. \U0001f4e2 "
             f"<b>{html.escape(title)}</b>"
             f"{selected_mark}\n"
 
-            f"   ðŸ†” <code>{channel_id}</code>\n"
+            f"   \U0001f194 <code>{channel_id}</code>\n"
 
-            f"   ðŸ”— "
+            f"   \U0001f517 "
             f"{html.escape(username_text)}\n\n"
         )
 
 
     message += (
 
-        "â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”\n\n"
+        "\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n\n"
 
-        "ðŸŽ¯ <b>Select Channel:</b>\n"
+        "\U0001f3af <b>Select Channel:</b>\n"
 
         "<code>/usechannel CHANNEL_ID</code>"
     )
@@ -843,7 +843,7 @@ async def use_channel(
 
         await update.message.reply_text(
 
-            "ðŸŽ¯ <b>Select Your Channel</b>\n\n"
+            "\U0001f3af <b>Select Your Channel</b>\n\n"
 
             "Pehle:\n"
             "<code>/channels</code>\n\n"
@@ -871,7 +871,7 @@ async def use_channel(
     except ValueError:
 
         await update.message.reply_text(
-            "âŒ Invalid Channel ID.",
+            "\u274c Invalid Channel ID.",
             parse_mode="HTML"
         )
 
@@ -885,7 +885,7 @@ async def use_channel(
 
         await update.message.reply_text(
 
-            "â›” <b>Access Denied</b>\n\n"
+            "\u26d4 <b>Access Denied</b>\n\n"
 
             "Ye channel aapke account se connected nahi hai.\n\n"
 
@@ -917,13 +917,13 @@ async def use_channel(
 
     await update.message.reply_text(
 
-        "âœ… <b>CHANNEL SELECTED</b>\n\n"
+        "\u2705 <b>CHANNEL SELECTED</b>\n\n"
 
-        f"ðŸ“¢ <b>{html.escape(title)}</b>\n"
+        f"\U0001f4e2 <b>{html.escape(title)}</b>\n"
 
-        f"ðŸ†” <code>{channel_id}</code>\n\n"
+        f"\U0001f194 <code>{channel_id}</code>\n\n"
 
-        "â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”\n\n"
+        "\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n\n"
 
         "Ab jo bhi rules/settings aap change karoge "
         "woh <b>sirf isi channel</b> ke liye honge.",
@@ -952,7 +952,7 @@ async def get_command_channel(
 
         await update.message.reply_text(
 
-            "âš ï¸ <b>No Channel Selected</b>\n\n"
+            "\u26a0\ufe0f <b>No Channel Selected</b>\n\n"
 
             "Pehle:\n"
             "<code>/channels</code>\n\n"
@@ -973,7 +973,7 @@ async def get_command_channel(
 
         await update.message.reply_text(
 
-            "â›” <b>Selected Channel Invalid</b>\n\n"
+            "\u26d4 <b>Selected Channel Invalid</b>\n\n"
 
             "Please <code>/channels</code> se "
             "channel dobara select karo.",
@@ -1008,7 +1008,7 @@ async def edit_channel_caption(
     async with _caption_semaphore:
 
         logger.info(
-            f"ðŸ“© Processing channel post | "
+            f"\U0001f4e9 Processing channel post | "
             f"Channel: {channel_id} | Message: {message_id}"
         )
 
@@ -1017,7 +1017,7 @@ async def edit_channel_caption(
 
         if not config or not config.get("active", True):
             logger.info(
-                f"â­ï¸ Channel {channel_id} not connected/active."
+                f"\u23ed\ufe0f Channel {channel_id} not connected/active."
             )
             return
 
@@ -1041,7 +1041,7 @@ async def edit_channel_caption(
         # Media without caption has nothing to edit.
         if not text_to_check:
             logger.info(
-                f"â­ï¸ Message {message_id} has no text/caption."
+                f"\u23ed\ufe0f Message {message_id} has no text/caption."
             )
             return
 
@@ -1093,7 +1093,7 @@ async def edit_channel_caption(
 
         except Exception as exc:
             logger.exception(
-                f"âŒ Text processing failed for message {message_id}: {exc}"
+                f"\u274c Text processing failed for message {message_id}: {exc}"
             )
             return
 
@@ -1133,7 +1133,7 @@ async def edit_channel_caption(
                     )
 
                     logger.info(
-                        f"âœ… Caption edited: {channel_id}/{message_id}"
+                        f"\u2705 Caption edited: {channel_id}/{message_id}"
                     )
 
             elif msg.text:
@@ -1149,7 +1149,7 @@ async def edit_channel_caption(
                     )
 
                     logger.info(
-                        f"âœ… Text edited: {channel_id}/{message_id}"
+                        f"\u2705 Text edited: {channel_id}/{message_id}"
                     )
 
             # Optional logging creates a second API call, so keep it
@@ -1164,14 +1164,14 @@ async def edit_channel_caption(
                     )
                 except Exception as log_error:
                     logger.warning(
-                        f"âš ï¸ Log copy failed for {channel_id}/{message_id}: "
+                        f"\u26a0\ufe0f Log copy failed for {channel_id}/{message_id}: "
                         f"{log_error}"
                     )
 
         except Exception as exc:
             # IMPORTANT: never silently swallow a failed message.
             logger.exception(
-                f"âŒ FAILED message {channel_id}/{message_id}: {exc}"
+                f"\u274c FAILED message {channel_id}/{message_id}: {exc}"
             )
 
 
@@ -1205,7 +1205,7 @@ async def add_rule(
 
         await update.message.reply_text(
 
-            "âœ¨ <b>ADD REPLACEMENT RULE</b>\n\n"
+            "\u2728 <b>ADD REPLACEMENT RULE</b>\n\n"
 
             "Format:\n"
             "<code>/addrule old_text -> new_text</code>\n\n"
@@ -1237,7 +1237,7 @@ async def add_rule(
         if not old_part:
 
             await update.message.reply_text(
-                "âŒ Old text empty nahi ho sakta.",
+                "\u274c Old text empty nahi ho sakta.",
                 parse_mode="HTML"
             )
 
@@ -1247,7 +1247,7 @@ async def add_rule(
         if not new_part:
 
             await update.message.reply_text(
-                "âŒ New text empty nahi ho sakta.",
+                "\u274c New text empty nahi ho sakta.",
                 parse_mode="HTML"
             )
 
@@ -1301,16 +1301,16 @@ async def add_rule(
 
             await update.message.reply_text(
 
-                "âœ… <b>RULE ADDED & LIVE!</b>\n\n"
+                "\u2705 <b>RULE ADDED & LIVE!</b>\n\n"
 
-                f"ðŸ“¢ <b>Channel:</b> "
+                f"\U0001f4e2 <b>Channel:</b> "
                 f"{html.escape(channel_title)}\n\n"
 
-                f"ðŸ” <code>{html.escape(old_part)}</code>"
-                " âž¡ï¸ "
+                f"\U0001f50d <code>{html.escape(old_part)}</code>"
+                " \u27a1\ufe0f "
                 f"<code>{html.escape(new_part)}</code>\n\n"
 
-                "ðŸ”’ Ye rule <b>sirf isi channel</b> "
+                "\U0001f512 Ye rule <b>sirf isi channel</b> "
                 "ke posts par apply hoga.",
 
                 parse_mode="HTML"
@@ -1321,13 +1321,13 @@ async def add_rule(
 
             await update.message.reply_text(
 
-                "ðŸ•’ <b>RULE SUBMITTED FOR REVIEW</b>\n\n"
+                "\U0001f552 <b>RULE SUBMITTED FOR REVIEW</b>\n\n"
 
-                f"ðŸ“¢ <b>Channel:</b> "
+                f"\U0001f4e2 <b>Channel:</b> "
                 f"{html.escape(channel_title)}\n\n"
 
-                f"ðŸ” <code>{html.escape(old_part)}</code>"
-                " âž¡ï¸ "
+                f"\U0001f50d <code>{html.escape(old_part)}</code>"
+                " \u27a1\ufe0f "
                 f"<code>{html.escape(new_part)}</code>\n\n"
 
                 "Admin approval ke baad rule isi "
@@ -1343,12 +1343,12 @@ async def add_rule(
     except Exception as e:
 
         logger.error(
-            f"âŒ Add rule error: {e}"
+            f"\u274c Add rule error: {e}"
         )
 
         await update.message.reply_text(
 
-            "âŒ <b>Error:</b> "
+            "\u274c <b>Error:</b> "
             "Kuch galat ho gaya.\n"
             "Format check karo.",
 
@@ -1386,7 +1386,7 @@ async def del_rule(
 
         await update.message.reply_text(
 
-            "âœ¨ <b>Format:</b>\n"
+            "\u2728 <b>Format:</b>\n"
             "<code>/delrule old_text</code>",
 
             parse_mode="HTML"
@@ -1410,7 +1410,7 @@ async def del_rule(
 
         await update.message.reply_text(
 
-            "âŒ <b>Rule Not Found</b>\n\n"
+            "\u274c <b>Rule Not Found</b>\n\n"
 
             "Exact old text use karo.",
 
@@ -1447,7 +1447,7 @@ async def del_rule(
 
         await update.message.reply_text(
 
-            "ðŸ—‘ï¸ <b>RULE DELETED</b>\n\n"
+            "\U0001f5d1\ufe0f <b>RULE DELETED</b>\n\n"
 
             f"<code>{html.escape(old_text)}</code>\n\n"
 
@@ -1462,7 +1462,7 @@ async def del_rule(
 
         await update.message.reply_text(
 
-            "â›” <b>Access Denied</b>\n\n"
+            "\u26d4 <b>Access Denied</b>\n\n"
 
             "Aap sirf apna rule delete kar sakte ho.",
 
@@ -1486,7 +1486,7 @@ async def approve_rule(
 
         await update.message.reply_text(
 
-            "â›” <b>Access Denied</b>\n\n"
+            "\u26d4 <b>Access Denied</b>\n\n"
             "Sirf admin approve kar sakte hain.",
 
             parse_mode="HTML"
@@ -1513,7 +1513,7 @@ async def approve_rule(
 
         await update.message.reply_text(
 
-            "âœ¨ <b>Format:</b>\n"
+            "\u2728 <b>Format:</b>\n"
             "<code>/approve old_text</code>",
 
             parse_mode="HTML"
@@ -1537,7 +1537,7 @@ async def approve_rule(
 
         await update.message.reply_text(
 
-            "âŒ Rule not found.",
+            "\u274c Rule not found.",
 
             parse_mode="HTML"
         )
@@ -1575,7 +1575,7 @@ async def approve_rule(
 
     await update.message.reply_text(
 
-        "âœ… <b>RULE APPROVED!</b>\n\n"
+        "\u2705 <b>RULE APPROVED!</b>\n\n"
 
         f"<code>{html.escape(old_text)}</code>\n\n"
 
@@ -1601,7 +1601,7 @@ async def pending(
 
         await update.message.reply_text(
 
-            "â›” <b>Access Denied.</b>",
+            "\u26d4 <b>Access Denied.</b>",
 
             parse_mode="HTML"
         )
@@ -1643,7 +1643,7 @@ async def pending(
 
         await update.message.reply_text(
 
-            "âœ… <i>No pending rules.</i>",
+            "\u2705 <i>No pending rules.</i>",
 
             parse_mode="HTML"
         )
@@ -1652,7 +1652,7 @@ async def pending(
 
 
     message = (
-        "ðŸ•’ <b>PENDING RULES</b>\n\n"
+        "\U0001f552 <b>PENDING RULES</b>\n\n"
     )
 
 
@@ -1665,12 +1665,12 @@ async def pending(
 
         message += (
 
-            f"ðŸ” <code>{html.escape(old)}</code>"
-            " âž¡ï¸ "
+            f"\U0001f50d <code>{html.escape(old)}</code>"
+            " \u27a1\ufe0f "
 
             f"<code>{html.escape(rule_value(rule))}</code>\n"
 
-            f"ðŸ‘¤ By: <code>{owner}</code>\n\n"
+            f"\U0001f464 By: <code>{owner}</code>\n\n"
         )
 
 
@@ -1705,7 +1705,7 @@ async def set_header(
 
         await update.message.reply_text(
 
-            "â›” <b>Access Denied.</b>",
+            "\u26d4 <b>Access Denied.</b>",
 
             parse_mode="HTML"
         )
@@ -1739,7 +1739,7 @@ async def set_header(
 
     await update.message.reply_text(
 
-        "ðŸ“ <b>HEADER UPDATED</b>\n\n"
+        "\U0001f4dd <b>HEADER UPDATED</b>\n\n"
 
         f"<code>{html.escape(header_text) or 'EMPTY'}</code>\n\n"
 
@@ -1765,7 +1765,7 @@ async def set_footer(
 
         await update.message.reply_text(
 
-            "â›” <b>Access Denied.</b>",
+            "\u26d4 <b>Access Denied.</b>",
 
             parse_mode="HTML"
         )
@@ -1799,7 +1799,7 @@ async def set_footer(
 
     await update.message.reply_text(
 
-        "ðŸ“ <b>FOOTER UPDATED</b>\n\n"
+        "\U0001f4dd <b>FOOTER UPDATED</b>\n\n"
 
         f"<code>{html.escape(footer_text) or 'EMPTY'}</code>\n\n"
 
@@ -1825,7 +1825,7 @@ async def clear_rules(
 
         await update.message.reply_text(
 
-            "â›” <b>Access Denied.</b>",
+            "\u26d4 <b>Access Denied.</b>",
 
             parse_mode="HTML"
         )
@@ -1854,7 +1854,7 @@ async def clear_rules(
 
     await update.message.reply_text(
 
-        "ðŸ§¹ <b>RULES CLEARED</b>\n\n"
+        "\U0001f9f9 <b>RULES CLEARED</b>\n\n"
 
         "Selected channel ke saare replacement "
         "rules clear ho gaye.",
@@ -1918,15 +1918,15 @@ async def status(
 
     message = (
 
-        "âš™ï¸ <b>AUTO CAPTION ENGINE</b>\n"
-        "ðŸ“Š <b>CHANNEL DASHBOARD</b>\n\n"
+        "\u2699\ufe0f <b>AUTO CAPTION ENGINE</b>\n"
+        "\U0001f4ca <b>CHANNEL DASHBOARD</b>\n\n"
 
-        "â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”\n\n"
+        "\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n\n"
 
-        f"ðŸ“¢ <b>Channel:</b> "
+        f"\U0001f4e2 <b>Channel:</b> "
         f"{html.escape(channel_title)}\n"
 
-        f"ðŸ†” <b>ID:</b> "
+        f"\U0001f194 <b>ID:</b> "
         f"<code>{channel_id}</code>\n"
     )
 
@@ -1935,7 +1935,7 @@ async def status(
 
         message += (
 
-            f"ðŸ”— <b>Username:</b> "
+            f"\U0001f517 <b>Username:</b> "
             f"@{html.escape(channel_username)}\n"
         )
 
@@ -1944,20 +1944,20 @@ async def status(
 
         "\n"
 
-        f"ðŸ“¡ <b>Log:</b> "
-        f"{'ðŸŸ¢ Connected' if LOG_CHANNEL_ID else 'ðŸ”´ Disabled'}\n"
+        f"\U0001f4e1 <b>Log:</b> "
+        f"{'\U0001f7e2 Connected' if LOG_CHANNEL_ID else '\U0001f534 Disabled'}\n"
 
-        f"ðŸ” <b>Header:</b> "
+        f"\U0001f51d <b>Header:</b> "
         f"<code>"
         f"{html.escape(custom_header) if custom_header else 'None'}"
         f"</code>\n"
 
-        f"ðŸ”š <b>Footer:</b> "
+        f"\U0001f51a <b>Footer:</b> "
         f"<code>"
         f"{html.escape(custom_footer) if custom_footer else 'None'}"
         f"</code>\n\n"
 
-        "ðŸ“Š <b>Replacement Rules:</b>\n"
+        "\U0001f4ca <b>Replacement Rules:</b>\n"
     )
 
 
@@ -1976,11 +1976,11 @@ async def status(
 
             tag = (
 
-                "ðŸŸ¢ LIVE"
+                "\U0001f7e2 LIVE"
 
                 if rule_approved(rule)
 
-                else "ðŸ•’ PENDING"
+                else "\U0001f552 PENDING"
             )
 
 
@@ -1991,7 +1991,7 @@ async def status(
 
             owner_tag = (
 
-                f" â€” By <code>{owner}</code>"
+                f" \u2014 By <code>{owner}</code>"
 
                 if owner
 
@@ -2001,14 +2001,14 @@ async def status(
 
             message += (
 
-                f"ðŸ” <code>{html.escape(old)}</code>"
-                " âž¡ï¸ "
+                f"\U0001f50d <code>{html.escape(old)}</code>"
+                " \u27a1\ufe0f "
 
                 f"<code>"
                 f"{html.escape(rule_value(rule) or '[REMOVED]')}"
                 f"</code>"
 
-                f" â€” {tag}"
+                f" \u2014 {tag}"
 
                 f"{owner_tag}\n"
             )
@@ -2038,7 +2038,7 @@ async def disconnect_channel(
 
         await update.message.reply_text(
 
-            "âœ¨ <b>Format:</b>\n"
+            "\u2728 <b>Format:</b>\n"
 
             "<code>/disconnect CHANNEL_ID</code>",
 
@@ -2057,7 +2057,7 @@ async def disconnect_channel(
     except ValueError:
 
         await update.message.reply_text(
-            "âŒ Invalid Channel ID.",
+            "\u274c Invalid Channel ID.",
             parse_mode="HTML"
         )
 
@@ -2073,7 +2073,7 @@ async def disconnect_channel(
 
             await update.message.reply_text(
 
-                "â›” <b>Access Denied.</b>",
+                "\u26d4 <b>Access Denied.</b>",
 
                 parse_mode="HTML"
             )
@@ -2112,9 +2112,9 @@ async def disconnect_channel(
 
     await update.message.reply_text(
 
-        "ðŸ”´ <b>CHANNEL DISCONNECTED</b>\n\n"
+        "\U0001f534 <b>CHANNEL DISCONNECTED</b>\n\n"
 
-        f"ðŸ†” <code>{channel_id}</code>\n\n"
+        f"\U0001f194 <code>{channel_id}</code>\n\n"
 
         "Ab is channel ke posts process nahi honge.",
 
@@ -2130,93 +2130,93 @@ def get_help_text():
 
     return (
 
-        "â“ <b>AUTO CAPTION ENGINE â€” HELP</b>\n\n"
+        "\u2753 <b>AUTO CAPTION ENGINE \u2014 HELP</b>\n\n"
 
-        "ðŸ¤– <b>Bot kya karta hai?</b>\n"
+        "\U0001f916 <b>Bot kya karta hai?</b>\n"
 
         "Auto Caption Engine aapke Telegram channel ke "
         "posts/captions ko automatically clean aur edit karta hai.\n\n"
 
-        "â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”\n\n"
+        "\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n\n"
 
-        "âž• <b>1. CHANNEL CONNECT</b>\n\n"
+        "\u2795 <b>1. CHANNEL CONNECT</b>\n\n"
 
         "Bot ko apne Telegram channel mein "
         "<b>Administrator</b> banao.\n\n"
 
-        "Channel automatically detect hokar connect ho jayega. âœ…\n\n"
+        "Channel automatically detect hokar connect ho jayega. \u2705\n\n"
 
-        "â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”\n\n"
+        "\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n\n"
 
-        "ðŸ“¢ <b>2. CHANNEL SELECT</b>\n\n"
+        "\U0001f4e2 <b>2. CHANNEL SELECT</b>\n\n"
 
         "<code>/channels</code>\n"
-        "â†’ Apne connected channels dekho.\n\n"
+        "\u2192 Apne connected channels dekho.\n\n"
 
         "<code>/usechannel CHANNEL_ID</code>\n"
-        "â†’ Channel select karo.\n\n"
+        "\u2192 Channel select karo.\n\n"
 
-        "â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”\n\n"
+        "\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n\n"
 
-        "ðŸ”„ <b>3. REPLACEMENT RULE</b>\n\n"
+        "\U0001f504 <b>3. REPLACEMENT RULE</b>\n\n"
 
         "Example:\n"
         "<code>/addrule MovieHub -> DG_Contents</code>\n\n"
 
         "Ye rule <b>sirf selected channel</b> ke posts "
-        "par apply hoga. ðŸ”’\n\n"
+        "par apply hoga. \U0001f512\n\n"
 
-        "â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”\n\n"
+        "\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n\n"
 
-        "ðŸ—‘ï¸ <b>4. DELETE RULE</b>\n\n"
+        "\U0001f5d1\ufe0f <b>4. DELETE RULE</b>\n\n"
 
         "<code>/delrule MovieHub</code>\n\n"
 
         "Normal users sirf apne rules delete kar sakte hain.\n\n"
 
-        "â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”\n\n"
+        "\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n\n"
 
-        "ðŸŽ¨ <b>5. HEADER / FOOTER</b>\n\n"
+        "\U0001f3a8 <b>5. HEADER / FOOTER</b>\n\n"
 
         "<code>/setheader Your Header</code>\n"
         "<code>/setfooter Your Footer</code>\n\n"
 
         "Ye settings selected channel ke liye hoti hain.\n\n"
 
-        "â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”\n\n"
+        "\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n\n"
 
-        "ðŸ“Š <b>6. STATUS</b>\n\n"
+        "\U0001f4ca <b>6. STATUS</b>\n\n"
 
         "<code>/status</code>\n\n"
 
         "Channel ke rules, header, footer aur log status dekho.\n\n"
 
-        "â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”\n\n"
+        "\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n\n"
 
-        "ðŸ‘‘ <b>7. ADMIN APPROVAL</b>\n\n"
+        "\U0001f451 <b>7. ADMIN APPROVAL</b>\n\n"
 
         "Public users ke naye rules approval ke liye pending rahenge.\n\n"
 
         "<code>/pending</code>\n"
         "<code>/approve old_text</code>\n\n"
 
-        "â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”\n\n"
+        "\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n\n"
 
-        "ðŸ§¹ <b>8. AUTOMATIC CLEANING</b>\n\n"
+        "\U0001f9f9 <b>8. AUTOMATIC CLEANING</b>\n\n"
 
         "Bot unwanted Telegram links aur @mentions ko "
         "automatically clean kar sakta hai.\n\n"
 
-        "â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”\n\n"
+        "\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n\n"
 
-        "ðŸ” <b>CHANNEL ISOLATION</b>\n\n"
+        "\U0001f510 <b>CHANNEL ISOLATION</b>\n\n"
 
         "Har connected channel ki settings alag hain.\n\n"
 
         "Ek channel ka replacement rule "
         "doosre channel par apply nahi hota.\n\n"
 
-        "ðŸ’¡ <i>Need help? Contact Support.</i>"
+        "\U0001f4a1 <i>Need help? Contact Support.</i>"
     )
 
 
@@ -2236,7 +2236,7 @@ async def help_command(
 
         [
             InlineKeyboardButton(
-                "âž• Add Me to Your Channel",
+                "\u2795 Add Me to Your Channel",
                 url=(
                     f"https://t.me/"
                     f"{BOT_USERNAME}"
@@ -2247,14 +2247,14 @@ async def help_command(
 
         [
             InlineKeyboardButton(
-                "ðŸ‘¥ Support",
+                "\U0001f465 Support",
                 url="https://t.me/dghelps_bot"
             )
         ],
 
         [
             InlineKeyboardButton(
-                "ðŸ”™ Back",
+                "\U0001f519 Back",
                 callback_data="back_start"
             )
         ],
@@ -2303,7 +2303,7 @@ def get_start_keyboard():
             [
                 InlineKeyboardButton(
 
-                    "âž• Add Me to Your Channel",
+                    "\u2795 Add Me to Your Channel",
 
                     url=(
                         f"https://t.me/"
@@ -2316,12 +2316,12 @@ def get_start_keyboard():
             [
 
                 InlineKeyboardButton(
-                    "ðŸ“¢ Channel",
+                    "\U0001f4e2 Channel",
                     url="https://t.me/dg_contents"
                 ),
 
                 InlineKeyboardButton(
-                    "ðŸ‘¥ Support",
+                    "\U0001f465 Support",
                     url="https://t.me/dghelps_bot"
                 )
             ],
@@ -2329,7 +2329,7 @@ def get_start_keyboard():
             [
 
                 InlineKeyboardButton(
-                    "â“ Help",
+                    "\u2753 Help",
                     callback_data="help"
                 )
             ],
@@ -2363,34 +2363,34 @@ async def start(
 
         welcome_text = (
 
-            f"âš¡ï¸ <b>Welcome, "
+            f"\u26a1\ufe0f <b>Welcome, "
             f"{html.escape(user_name)}!</b> "
             f"(Admin)\n\n"
 
-            "ðŸš€ <b>Auto Caption Engine v4.0</b>\n"
-            "ðŸ“¡ <b>Channel-Isolated PRO System</b>\n\n"
+            "\U0001f680 <b>Auto Caption Engine v4.0</b>\n"
+            "\U0001f4e1 <b>Channel-Isolated PRO System</b>\n\n"
 
-            "â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”\n\n"
+            "\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n\n"
 
-            "ðŸ¤– <b>What I Do</b>\n\n"
+            "\U0001f916 <b>What I Do</b>\n\n"
 
             "I automatically clean and edit captions "
             "in your connected Telegram channels.\n\n"
 
-            "ðŸ”’ Every channel has its own separate "
+            "\U0001f512 Every channel has its own separate "
             "rules and settings.\n\n"
 
-            "â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”\n\n"
+            "\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n\n"
 
-            "âš¡ <b>Quick Start</b>\n\n"
+            "\u26a1 <b>Quick Start</b>\n\n"
 
-            "1ï¸âƒ£ Add me to your channel as Admin\n"
-            "2ï¸âƒ£ Channel automatically connects\n"
-            "3ï¸âƒ£ Use <code>/channels</code>\n"
-            "4ï¸âƒ£ Select with <code>/usechannel ID</code>\n"
-            "5ï¸âƒ£ Add rules\n\n"
+            "1\ufe0f\u20e3 Add me to your channel as Admin\n"
+            "2\ufe0f\u20e3 Channel automatically connects\n"
+            "3\ufe0f\u20e3 Use <code>/channels</code>\n"
+            "4\ufe0f\u20e3 Select with <code>/usechannel ID</code>\n"
+            "5\ufe0f\u20e3 Add rules\n\n"
 
-            "ðŸ‘‡ Use the buttons below to get started."
+            "\U0001f447 Use the buttons below to get started."
         )
 
 
@@ -2402,36 +2402,36 @@ async def start(
 
         welcome_text = (
 
-            f"ðŸ‘‹ <b>Hello, "
+            f"\U0001f44b <b>Hello, "
             f"{html.escape(user_name)}!</b>\n\n"
 
-            "ðŸš€ <b>Auto Caption Engine v4.0</b>\n"
-            "âš¡ <i>Smart â€¢ Fast â€¢ Channel-Isolated</i>\n\n"
+            "\U0001f680 <b>Auto Caption Engine v4.0</b>\n"
+            "\u26a1 <i>Smart \u2022 Fast \u2022 Channel-Isolated</i>\n\n"
 
-            "â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”\n\n"
+            "\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n\n"
 
-            "ðŸ¤– <b>Automatically manage your captions</b>\n\n"
+            "\U0001f916 <b>Automatically manage your captions</b>\n\n"
 
-            "â€¢ ðŸ”„ Replace unwanted words\n"
-            "â€¢ ðŸ§¹ Clean unwanted links/mentions\n"
-            "â€¢ ðŸŽ¨ Add custom header/footer\n"
-            "â€¢ ðŸ”’ Separate settings for every channel\n\n"
+            "\u2022 \U0001f504 Replace unwanted words\n"
+            "\u2022 \U0001f9f9 Clean unwanted links/mentions\n"
+            "\u2022 \U0001f3a8 Add custom header/footer\n"
+            "\u2022 \U0001f512 Separate settings for every channel\n\n"
 
-            "â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”\n\n"
+            "\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n\n"
 
-            "ðŸš€ <b>Get Started</b>\n\n"
+            "\U0001f680 <b>Get Started</b>\n\n"
 
-            "1ï¸âƒ£ Click <b>Add Me to Your Channel</b>\n"
-            "2ï¸âƒ£ Select your channel\n"
-            "3ï¸âƒ£ Give me Administrator permission\n"
-            "4ï¸âƒ£ I will automatically connect your channel\n\n"
+            "1\ufe0f\u20e3 Click <b>Add Me to Your Channel</b>\n"
+            "2\ufe0f\u20e3 Select your channel\n"
+            "3\ufe0f\u20e3 Give me Administrator permission\n"
+            "4\ufe0f\u20e3 I will automatically connect your channel\n\n"
 
             "After connection, use:\n"
             "<code>/channels</code>\n"
             "<code>/usechannel CHANNEL_ID</code>\n"
             "<code>/addrule old -> new</code>\n\n"
 
-            "ðŸ‘‡ Tap <b>Help</b> if you need a complete guide."
+            "\U0001f447 Tap <b>Help</b> if you need a complete guide."
         )
 
 
@@ -2491,42 +2491,42 @@ async def button_handler(
 
             welcome_text = (
 
-                f"âš¡ï¸ <b>Welcome, "
+                f"\u26a1\ufe0f <b>Welcome, "
                 f"{html.escape(user_name)}!</b> "
                 f"(Admin)\n\n"
 
-                "ðŸš€ <b>Auto Caption Engine v4.0</b>\n"
-                "ðŸ“¡ <b>Channel-Isolated PRO System</b>\n\n"
+                "\U0001f680 <b>Auto Caption Engine v4.0</b>\n"
+                "\U0001f4e1 <b>Channel-Isolated PRO System</b>\n\n"
 
-                "â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”\n\n"
+                "\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n\n"
 
-                "ðŸ¤– Automatically clean and edit "
+                "\U0001f916 Automatically clean and edit "
                 "your connected channel captions.\n\n"
 
-                "ðŸ”’ Every channel has separate "
+                "\U0001f512 Every channel has separate "
                 "rules and settings.\n\n"
 
-                "ðŸ‘‡ Choose an option below."
+                "\U0001f447 Choose an option below."
             )
 
         else:
 
             welcome_text = (
 
-                f"ðŸ‘‹ <b>Hello, "
+                f"\U0001f44b <b>Hello, "
                 f"{html.escape(user_name)}!</b>\n\n"
 
-                "ðŸš€ <b>Auto Caption Engine v4.0</b>\n\n"
+                "\U0001f680 <b>Auto Caption Engine v4.0</b>\n\n"
 
-                "ðŸ¤– Smart automatic caption editor.\n\n"
+                "\U0001f916 Smart automatic caption editor.\n\n"
 
-                "âž• Add me to your channel as Admin "
+                "\u2795 Add me to your channel as Admin "
                 "and your channel will automatically connect.\n\n"
 
-                "ðŸ”’ Your rules will work only in "
+                "\U0001f512 Your rules will work only in "
                 "your connected channel.\n\n"
 
-                "ðŸ‘‡ Choose an option below."
+                "\U0001f447 Choose an option below."
             )
 
 
@@ -2568,7 +2568,7 @@ def main():
     if not TOKEN:
 
         logger.error(
-            "âŒ BOT_TOKEN environment variable missing."
+            "\u274c BOT_TOKEN environment variable missing."
         )
 
         sys.exit(1)
@@ -2738,19 +2738,19 @@ def main():
     # ========================================================
 
     logger.info(
-        "ðŸ¤– Auto Caption Engine v4.0 starting..."
+        "\U0001f916 Auto Caption Engine v4.0 starting..."
     )
 
     logger.info(
-        "ðŸ“¡ Channel-isolated mode enabled."
+        "\U0001f4e1 Channel-isolated mode enabled."
     )
 
     logger.info(
-        f"ðŸ‘‘ Admin IDs: {ADMIN_IDS}"
+        f"\U0001f451 Admin IDs: {ADMIN_IDS}"
     )
 
     logger.info(
-        f"ðŸ¤– Bot username: @{BOT_USERNAME}"
+        f"\U0001f916 Bot username: @{BOT_USERNAME}"
     )
 
 
