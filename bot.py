@@ -92,16 +92,22 @@ async def edit_channel_caption(update: Update, context: ContextTypes.DEFAULT_TYP
 
     final_text = text_to_check
 
-    # AUTOMATIC SPAM REMOVER
-    final_text = re.sub(r'(https?://)?t\.me/(?!DG_Contents|dghelps_bot)[a-zA-Z0-9_]+', '', final_text)
-    final_text = re.sub(r'@(?!DG_Contents|dghelps_bot)[a-zA-Z0-9_]+', '', final_text)
+    try:
+        # AUTOMATIC SPAM REMOVER
+        final_text = re.sub(r'(https?://)?t\.me/(?!DG_Contents|dghelps_bot)[a-zA-Z0-9_]+', '', final_text)
+        final_text = re.sub(r'@(?!DG_Contents|dghelps_bot)[a-zA-Z0-9_]+', '', final_text)
 
-    # REPLACEMENT LOOP
-    for old_txt, new_txt in replacement_rules.items():
-        if re.search(old_txt, final_text, re.IGNORECASE):
-            final_text = re.compile(old_txt, re.IGNORECASE).sub(new_txt, final_text)
+        # REPLACEMENT LOOP (old_txt ko literal text treat karte hain, regex nahi —
+        # warna special characters wale rules crash kar dete the)
+        for old_txt, new_txt in replacement_rules.items():
+            pattern = re.compile(re.escape(old_txt), re.IGNORECASE)
+            final_text = pattern.sub(new_txt, final_text)
 
-    final_text = re.sub(r' +', ' ', final_text).strip()
+        final_text = re.sub(r' +', ' ', final_text).strip()
+    except Exception as e:
+        logger.error(f"❌ Text processing FAIL ho gaya (replacement rules check karo): {e}")
+        return
+
     header_part = f"<b>{custom_header}</b>\n\n" if custom_header else ""
     footer_part = f"\n\n<b>{custom_footer}</b>" if custom_footer else ""
     bold_text = f"{header_part}<b>{final_text}</b>{footer_part}"
