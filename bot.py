@@ -70,7 +70,7 @@ async def edit_channel_caption(update: Update, context: ContextTypes.DEFAULT_TYP
     replacement_rules = config.get("replacement_rules", {})
     custom_header = config.get("custom_header", "")
     custom_footer = config.get("custom_footer", "")
-    
+
     msg = update.channel_post or update.edited_channel_post
     if not msg: return
 
@@ -78,7 +78,7 @@ async def edit_channel_caption(update: Update, context: ContextTypes.DEFAULT_TYP
     if not text_to_check: return
 
     final_text = text_to_check
-    
+
     # AUTOMATIC SPAM REMOVER
     final_text = re.sub(r'(https?://)?t\.me/(?!DG_Contents|dghelps_bot)[a-zA-Z0-9_]+', '', final_text)
     final_text = re.sub(r'@(?!DG_Contents|dghelps_bot)[a-zA-Z0-9_]+', '', final_text)
@@ -111,7 +111,7 @@ async def add_rule(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if OWNER_ID != 0 and update.effective_user.id != OWNER_ID:
         await update.message.reply_text("⛔ <b>Access Denied:</b> Yeh ek private bot hai.", parse_mode="HTML")
         return
-        
+
     config = get_bot_settings()
     rules = config.get("replacement_rules", {})
     raw_args = " ".join(context.args)
@@ -123,7 +123,8 @@ async def add_rule(update: Update, context: ContextTypes.DEFAULT_TYPE):
         rules[old_part.strip()] = new_part.strip()
         update_bot_settings("replacement_rules", rules)
         await update.message.reply_text("✅ <b>Success:</b> Filter rule active and saved permanently to MongoDB!", parse_mode="HTML")
-    except Exception: pass
+    except Exception:
+        await update.message.reply_text("❌ <b>Error:</b> Kuch galat ho gaya, format check karo.", parse_mode="HTML")
 
 async def del_rule(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if OWNER_ID != 0 and update.effective_user.id != OWNER_ID: return
@@ -159,31 +160,31 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if OWNER_ID != 0 and update.effective_user.id != OWNER_ID:
         await update.message.reply_text("⛔ <b>Access Denied:</b> Diagnostics panel locked.", parse_mode="HTML")
         return
-        
+
     config = get_bot_settings()
     replacement_rules = config.get("replacement_rules", {})
     custom_header = config.get("custom_header", "")
     custom_footer = config.get("custom_footer", "")
-    
+
     status_msg = "⚙️ <b>𝖯𝖱𝖮 𝖡𝖮𝖲𝖲 𝖣𝖠𝖲𝖧𝖡𝖮𝖠𝖱𝖣 (📡 MongoDB Connected)</b>\n\n"
     status_msg += f"📢 <b>Log Status:</b> {'🟢 Connected' if LOG_CHANNEL_ID else '🔴 Disconnected'}\n"
     status_msg += f"🔝 <b>Active Header:</b> <code>{custom_header if custom_header else 'None'}</code>\n"
     status_msg += f"🔚 <b>Active Footer:</b> <code>{custom_footer if custom_footer else 'None'}</code>\n\n"
     status_msg += "📊 <b>Word Replacement Rules:</b>\n"
-    
+
     if not replacement_rules:
         status_msg += "<i>No active filters loaded in database.</i>"
     else:
         for old, new in replacement_rules.items():
             status_msg += f"🔍 <code>{old}</code> ➡️ <code>{new if new else '[REMOVED]'}</code>\n"
-            
+
     await update.message.reply_text(status_msg, parse_mode="HTML")
 
 # PRIVATE WELCOME MESSAGE
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     user_name = update.effective_user.first_name
-    
+
     if OWNER_ID != 0 and user_id != OWNER_ID:
         await update.message.reply_text(
             f"🔒 <b>Hello, {user_name}!</b>\n\n"
@@ -205,21 +206,26 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"ℹ️ <i>Just add me to your channel as admin, I will handle the rest with supersonic speed.</i>"
     )
     keyboard = [[
-        InlineKeyboardButton("📢 Channel", url="https://t.me/dg_contents"), 
+        InlineKeyboardButton("📢 Channel", url="https://t.me/dg_contents"),
         InlineKeyboardButton("👥 Support", url="https://t.me/dghelps_bot")
     ]]
     await update.message.reply_text(text=welcome_text, parse_mode='HTML', reply_markup=InlineKeyboardMarkup(keyboard))
 
 def main():
     threading.Thread(target=start_dummy_server, daemon=True).start()
-    try: loop = asyncio.get_event_loop()
+    try:
+        loop = asyncio.get_event_loop()
     except RuntimeError:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-        
+
     TOKEN = os.environ.get("BOT_TOKEN")
+    if not TOKEN:
+        print("❌ BOT_TOKEN environment variable set nahi hai. Bot start nahi ho sakta.")
+        sys.exit(1)
+
     app = ApplicationBuilder().token(TOKEN).build()
-    
+
     # REGISTER COMMAND HANDLERS
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("addrule", add_rule))
@@ -228,3 +234,15 @@ def main():
     app.add_handler(CommandHandler("setheader", set_header))
     app.add_handler(CommandHandler("status", status))
     app.add_handler(CommandHandler("clear", clear_rules))
+
+    # REGISTER MESSAGE HANDLER (channel posts + edited channel posts, naya add hua)
+    app.add_handler(MessageHandler(
+        filters.UpdateType.CHANNEL_POST | filters.UpdateType.EDITED_CHANNEL_POST,
+        edit_channel_caption
+    ))
+
+    print("🤖 Auto Caption Bot is starting... Polling active.")
+    app.run_polling(allowed_updates=Update.ALL_TYPES)
+
+if __name__ == "__main__":
+    main()
