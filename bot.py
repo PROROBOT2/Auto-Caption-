@@ -184,7 +184,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     user_name = update.effective_user.first_name
     
-    # Guard clause: Sirf tumhare liye details chalengi
     if OWNER_ID != 0 and user_id != OWNER_ID:
         await update.message.reply_text(
             f"🔒 <b>Hello, {user_name}!</b>\n\n"
@@ -217,11 +216,15 @@ def main():
     except RuntimeError:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
+        
     TOKEN = os.environ.get("BOT_TOKEN")
     app = ApplicationBuilder().token(TOKEN).build()
+    
+    # REGISTER COMMAND HANDLERS
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("addrule", add_rule))
     app.add_handler(CommandHandler("delrule", del_rule))
     app.add_handler(CommandHandler("setfooter", set_footer))
     app.add_handler(CommandHandler("setheader", set_header))
+    app.add_handler(CommandHandler("status", status))
     app.add_handler(CommandHandler("clear", clear_rules))
