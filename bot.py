@@ -5,9 +5,17 @@ import http.server
 import socketserver
 import threading
 import re
+import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
 from pymongo import MongoClient
+
+# LOGGING SETUP (Render logs mein dikhega — debugging ke liye zaroori)
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
+logger = logging.getLogger(__name__)
 
 # 1. Render Dummy Server (Keep Alive 24/7)
 def start_dummy_server():
@@ -72,10 +80,15 @@ async def edit_channel_caption(update: Update, context: ContextTypes.DEFAULT_TYP
     custom_footer = config.get("custom_footer", "")
 
     msg = update.channel_post or update.edited_channel_post
-    if not msg: return
+    if not msg:
+        return
+
+    logger.info(f"📩 Channel post mila. Chat ID: {msg.chat_id}, Message ID: {msg.message_id}")
 
     text_to_check = msg.text or msg.caption
-    if not text_to_check: return
+    if not text_to_check:
+        logger.info("⚠️ Is post mein na text hai na caption — skip kar raha hoon.")
+        return
 
     final_text = text_to_check
 
@@ -95,16 +108,25 @@ async def edit_channel_caption(update: Update, context: ContextTypes.DEFAULT_TYP
 
     try:
         if msg.caption:
-            if msg.caption_html == bold_text: return
+            if msg.caption_html == bold_text:
+                logger.info("ℹ️ Caption already same hai, edit skip kar raha hoon.")
+                return
             await context.bot.edit_message_caption(chat_id=msg.chat_id, message_id=msg.message_id, caption=bold_text, parse_mode="HTML")
+            logger.info("✅ Caption successfully edit ho gaya.")
         elif msg.text:
-            if msg.text_html == bold_text: return
+            if msg.text_html == bold_text:
+                logger.info("ℹ️ Text already same hai, edit skip kar raha hoon.")
+                return
             await context.bot.edit_message_text(chat_id=msg.chat_id, message_id=msg.message_id, text=bold_text, parse_mode="HTML")
+            logger.info("✅ Text successfully edit ho gaya.")
+
         if LOG_CHANNEL_ID:
-            try: await context.bot.copy_message(chat_id=LOG_CHANNEL_ID, from_chat_id=msg.chat_id, message_id=msg.message_id)
-            except Exception: pass
-    except Exception:
-        pass
+            try:
+                await context.bot.copy_message(chat_id=LOG_CHANNEL_ID, from_chat_id=msg.chat_id, message_id=msg.message_id)
+            except Exception as log_err:
+                logger.warning(f"⚠️ Log channel mein copy nahi ho paya: {log_err}")
+    except Exception as e:
+        logger.error(f"❌ Caption/Text edit FAIL ho gaya: {e}")
 
 # 3. Dynamic Admin Commands Setup (STRICTLY OWNER ONLY)
 async def add_rule(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -241,7 +263,7 @@ def main():
         edit_channel_caption
     ))
 
-    print("🤖 Auto Caption Bot is starting... Polling active.")
+    logger.info("🤖 Auto Caption Bot is starting... Polling active.")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
