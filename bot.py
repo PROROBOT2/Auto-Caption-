@@ -296,6 +296,47 @@ async def safe_edit(bot, *, channel_id, message_id, content, is_caption):
     return None
 
 
+
+async def send_edit_log(bot, job, status="SUCCESS"):
+    """
+    Log ONLY useful processing information.
+    Never forward/copy the original photo, video, document, or file
+    into the log channel.
+    """
+    if not LOG_CHANNEL_ID:
+        return
+
+    channel_id = job["channel_id"]
+    message_id = job["message_id"]
+    final_plain = job.get("final_plain", "")
+    is_caption = job.get("is_caption", False)
+
+    kind = "Media caption" if is_caption else "Text message"
+
+    # Keep the log compact and safe for Telegram HTML.
+    preview = html.escape(final_plain[:350])
+    if len(final_plain) > 350:
+        preview += "â€¦"
+
+    log_text = (
+        f"ðŸ“ <b>Caption Engine â€” {html.escape(status)}</b>\n\n"
+        f"ðŸ“¢ <b>Channel ID:</b> <code>{channel_id}</code>\n"
+        f"ðŸ†” <b>Message ID:</b> <code>{message_id}</code>\n"
+        f"ðŸ“¦ <b>Type:</b> {kind}\n\n"
+        f"ðŸ“„ <b>Result:</b>\n{preview}"
+    )
+
+    try:
+        await bot.send_message(
+            chat_id=LOG_CHANNEL_ID,
+            text=log_text,
+            parse_mode="HTML",
+            disable_web_page_preview=True,
+        )
+    except Exception as exc:
+        logger.warning("âš ï¸ Could not send compact edit log: %s", exc)
+
+
 async def run_edit_job(job):
     bot = job["bot"]
     channel_id = job["channel_id"]
@@ -330,6 +371,13 @@ async def run_edit_job(job):
             elapsed,
         )
 
+        # Log metadata/result only â€” never forward the actual media/file.
+        await send_edit_log(
+            bot,
+            job,
+            status="SUCCESS",
+        )
+
         return "ok", job, None
 
     except RetryAfter as exc:
@@ -362,6 +410,11 @@ async def run_edit_job(job):
             message_id,
             exc,
         )
+        await send_edit_log(
+            bot,
+            job,
+            status="FAILED",
+        )
         return "failed", job, None
 
     except Exception as exc:
@@ -370,6 +423,11 @@ async def run_edit_job(job):
             channel_id,
             message_id,
             exc,
+        )
+        await send_edit_log(
+            bot,
+            job,
+            status="FAILED",
         )
         return "failed", job, None
 
@@ -1903,7 +1961,7 @@ async def start(
         welcome_text = (
             f"âš¡ï¸ <b>Welcome, "
             f"{html.escape(user_name)}!</b> (Admin)\n\n"
-            "ðŸš€ <b>Auto Caption Engine v5.0</b>\n"
+            "ðŸš€ <b>Auto Caption Engine v6.0</b>\n"
             "ðŸ“¡ <b>Controlled Batch + Anti-Loop System</b>\n\n"
             "â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”\n\n"
             "ðŸ¤– Automatically clean and edit captions "
@@ -1921,7 +1979,7 @@ async def start(
         welcome_text = (
             f"ðŸ‘‹ <b>Hello, "
             f"{html.escape(user_name)}!</b>\n\n"
-            "ðŸš€ <b>Auto Caption Engine v5.0</b>\n"
+            "ðŸš€ <b>Auto Caption Engine v6.0</b>\n"
             "âš¡ Smart â€¢ Fast â€¢ Channel-Isolated\n\n"
             "â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”\n\n"
             "ðŸ¤– Automatically manage your captions.\n\n"
@@ -1974,7 +2032,7 @@ async def button_handler(
             welcome_text = (
                 f"âš¡ï¸ <b>Welcome, "
                 f"{html.escape(user_name)}!</b> (Admin)\n\n"
-                "ðŸš€ <b>Auto Caption Engine v5.0</b>\n\n"
+                "ðŸš€ <b>Auto Caption Engine v6.0</b>\n\n"
                 "ðŸ¤– Controlled caption processing.\n"
                 "ðŸ”’ Channel-isolated settings.\n\n"
                 "ðŸ‘‡ Choose an option below."
@@ -1983,7 +2041,7 @@ async def button_handler(
             welcome_text = (
                 f"ðŸ‘‹ <b>Hello, "
                 f"{html.escape(user_name)}!</b>\n\n"
-                "ðŸš€ <b>Auto Caption Engine v5.0</b>\n\n"
+                "ðŸš€ <b>Auto Caption Engine v6.0</b>\n\n"
                 "ðŸ¤– Smart automatic caption editor.\n\n"
                 "ðŸ‘‡ Choose an option below."
             )
@@ -2101,7 +2159,7 @@ def main():
 
     app.add_error_handler(error_handler)
 
-    logger.info("ðŸ¤– Auto Caption Engine v5.0 starting...")
+    logger.info("ðŸ¤– Auto Caption Engine v6.0 starting...")
     logger.info(
         "ðŸ“¦ Edit schedule: %d + %d, then %.0fs cooldown",
         BATCH_SIZE,
