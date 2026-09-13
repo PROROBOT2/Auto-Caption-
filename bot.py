@@ -147,24 +147,20 @@ except ValueError:
 # which prevents that loop.
 #
 # Queue behavior:
-#   10 jobs -> fast batch
-#   10 jobs -> fast batch
-#   40 sec cooldown
-#   repeat
+#   Up to 10 jobs -> fast batch -> continuous
 #
-# If Telegram sends RetryAfter, the exact server wait is respected
-# instead of blindly sending requests again.
+# There is NO artificial cooldown. If Telegram sends RetryAfter,
+# the exact server wait is respected.
 # ============================================================
 
 BATCH_SIZE = 10
-BATCHES_BEFORE_COOLDOWN = 2
-COOLDOWN_SECONDS = 40.0
 
-# Small stagger makes a 10-job burst less aggressive while still
-# keeping the batch very fast.
-EDIT_STAGGER_SECONDS = 0.12
+# No artificial cooldown. Jobs are processed continuously.
+# Telegram RetryAfter is respected only when Telegram actually
+# asks us to slow down.
+EDIT_STAGGER_SECONDS = 0.05
 
-MAX_EDIT_RETRIES = 5
+MAX_EDIT_RETRIES = 3
 
 QUEUE_MAX_SIZE = 5000
 CONFIG_CACHE_TTL = 30.0
@@ -251,6 +247,10 @@ async def safe_edit(bot, *, channel_id, message_id, content, is_caption):
                     message_id=message_id,
                     caption=content,
                     parse_mode="HTML",
+                    read_timeout=10.0,
+                    write_timeout=10.0,
+                    connect_timeout=5.0,
+                    pool_timeout=5.0,
                 )
 
             return await bot.edit_message_text(
@@ -258,6 +258,10 @@ async def safe_edit(bot, *, channel_id, message_id, content, is_caption):
                 message_id=message_id,
                 text=content,
                 parse_mode="HTML",
+                read_timeout=10.0,
+                write_timeout=10.0,
+                connect_timeout=5.0,
+                pool_timeout=5.0,
             )
 
         except RetryAfter:
@@ -268,7 +272,7 @@ async def safe_edit(bot, *, channel_id, message_id, content, is_caption):
 
             wait_time = min(
                 0.5 * (2 ** (attempt - 1)),
-                5.0,
+                2.0,
             )
 
             logger.warning(
@@ -297,44 +301,44 @@ async def safe_edit(bot, *, channel_id, message_id, content, is_caption):
 
 
 
-async def send_edit_log(bot, job, status="SUCCESS"):
-    """
-    Log ONLY useful processing information.
-    Never forward/copy the original photo, video, document, or file
-    into the log channel.
+async def send_log_event(bot, title, details="", level="INFO"):
+    """Send ONLY important events to LOG_CHANNEL_ID.
+
+    Intentionally does NOT log every received/queued/edited post.
+    This keeps the Telegram log channel clean and useful.
     """
     if not LOG_CHANNEL_ID:
         return
 
-    channel_id = job["channel_id"]
-    message_id = job["message_id"]
-    final_plain = job.get("final_plain", "")
-    is_caption = job.get("is_caption", False)
+    icons = {
+        "INFO": "\U0001f7e2",
+        "SUCCESS": "\U00002705",
+        "WARNING": "\U000026a0\U0000fe0f",
+        "ERROR": "\U0000274c",
+        "ONLINE": "\U0001f916",
+        "OFFLINE": "\U0001f534",
+    }
 
-    kind = "Media caption" if is_caption else "Text message"
+    icon = icons.get(level, "\U0001f4cc")
+    safe_title = html.escape(str(title))
+    safe_details = html.escape(str(details)) if details else ""
 
-    # Keep the log compact and safe for Telegram HTML.
-    preview = html.escape(final_plain[:350])
-    if len(final_plain) > 350:
-        preview += "\U00002026"
-
-    log_text = (
-        f"\U0001f4dd <b>Caption Engine \U00002014 {html.escape(status)}</b>\n\n"
-        f"\U0001f4e2 <b>Channel ID:</b> <code>{channel_id}</code>\n"
-        f"\U0001f194 <b>Message ID:</b> <code>{message_id}</code>\n"
-        f"\U0001f4e6 <b>Type:</b> {kind}\n\n"
-        f"\U0001f4c4 <b>Result:</b>\n{preview}"
-    )
+    text = f"{icon} <b>{safe_title}</b>"
+    if safe_details:
+        text += f"\n\n{safe_details}"
 
     try:
         await bot.send_message(
             chat_id=LOG_CHANNEL_ID,
-            text=log_text,
+            text=text,
             parse_mode="HTML",
             disable_web_page_preview=True,
         )
     except Exception as exc:
-        logger.warning("\U000026a0\U0000fe0f Could not send compact edit log: %s", exc)
+        logger.warning(
+            "Could not send important log event: %s",
+            exc,
+        )
 
 
 async def run_edit_job(job):
@@ -410,10 +414,11 @@ async def run_edit_job(job):
             message_id,
             exc,
         )
-        await send_edit_log(
+        await send_log_event(
             bot,
-            job,
-            status="FAILED",
+            "CAPTION EDIT FAILED",
+            f"Channel: {channel_id}\nMessage: {message_id}\nError: {exc}",
+            level="ERROR",
         )
         return "failed", job, None
 
@@ -424,10 +429,11 @@ async def run_edit_job(job):
             message_id,
             exc,
         )
-        await send_edit_log(
+        await send_log_event(
             bot,
-            job,
-            status="FAILED",
+            "CAPTION EDIT FAILED",
+            f"Channel: {channel_id}\nMessage: {message_id}\nError: {exc}",
+            level="ERROR",
         )
         return "failed", job, None
 
@@ -457,33 +463,20 @@ async def enqueue_caption_job(job):
 
 
 async def caption_batch_worker():
-    """
-    Main controlled edit worker.
-
-    Two batches of 10 are processed quickly.
-    Then the worker sleeps for 40 seconds.
-    Telegram RetryAfter always overrides this schedule.
-    """
-
-    batches_done = 0
+    """Continuously process up to BATCH_SIZE edits without an artificial cooldown."""
 
     while True:
         try:
             first_key = await _caption_queue.get()
-
             keys = [first_key]
 
-            # Collect up to BATCH_SIZE jobs that are already waiting.
             for _ in range(BATCH_SIZE - 1):
                 try:
-                    keys.append(
-                        _caption_queue.get_nowait()
-                    )
+                    keys.append(_caption_queue.get_nowait())
                 except asyncio.QueueEmpty:
                     break
 
             jobs = []
-
             for key in keys:
                 job = _pending_jobs.pop(key, None)
                 if job is not None:
@@ -495,98 +488,72 @@ async def caption_batch_worker():
                 continue
 
             logger.info(
-                "\U0001f680 EDIT BATCH START | size=%d | queue=%d | batch_cycle=%d/%d",
+                "\U0001f680 EDIT BATCH | size=%d | queue=%d",
                 len(jobs),
                 _caption_queue.qsize(),
-                batches_done + 1,
-                BATCHES_BEFORE_COOLDOWN,
             )
 
-            # Stagger jobs slightly. They still finish very quickly,
-            # but this is safer than firing all 10 at the exact same
-            # millisecond.
             async def delayed_job(index, job):
                 if index:
-                    await asyncio.sleep(
-                        EDIT_STAGGER_SECONDS * index
-                    )
+                    await asyncio.sleep(EDIT_STAGGER_SECONDS * index)
                 return await run_edit_job(job)
 
             results = await asyncio.gather(
-                *[
-                    delayed_job(index, job)
-                    for index, job in enumerate(jobs)
-                ],
+                *[delayed_job(i, job) for i, job in enumerate(jobs)],
                 return_exceptions=False,
             )
 
+            for _ in keys:
+                _caption_queue.task_done()
+
+            # Only jobs that Telegram explicitly rate-limited are retried.
+            # A rate limit must not create an artificial 40-second pause.
             rate_limited = [
                 (result[1], result[2])
                 for result in results
                 if result[0] == "rate_limit"
             ]
 
-            # Mark queue tasks complete for the jobs removed above.
-            for _ in keys:
-                _caption_queue.task_done()
-
             if rate_limited:
-                # Respect the largest RetryAfter returned by Telegram.
-                server_wait = max(
-                    wait
-                    for _, wait in rate_limited
-                )
-
-                # Tiny safety margin so we don't hit the limit again
-                # exactly at the boundary.
-                wait_time = server_wait + 1.0
+                server_wait = max(wait for _, wait in rate_limited)
+                wait_time = server_wait + 0.25
 
                 logger.warning(
-                    "\U0001f6d1 RATE LIMIT | failed=%d | waiting %.1fs",
+                    "\U0001f6d1 Telegram rate limit; retrying %d job(s) in %.1fs",
                     len(rate_limited),
                     wait_time,
                 )
 
-                await asyncio.sleep(wait_time)
+                await send_log_event(
+                    jobs[0]["bot"],
+                    "TELEGRAM RATE LIMIT",
+                    f"{len(rate_limited)} edit(s) delayed by Telegram\nWait: {wait_time:.1f}s",
+                    level="WARNING",
+                )
 
-                # Requeue only jobs that actually received 429.
+                await asyncio.sleep(wait_time)
                 for job, _ in rate_limited:
                     await enqueue_caption_job(job)
 
-                # Restart the two-batch cycle after a server rate limit.
-                batches_done = 0
-
-            else:
-                batches_done += 1
-
-                if batches_done >= BATCHES_BEFORE_COOLDOWN:
-                    logger.info(
-                        "\U0001f634 Two fast batches complete. "
-                        "Cooldown %.0fs started.",
-                        COOLDOWN_SECONDS,
-                    )
-
-                    await asyncio.sleep(
-                        COOLDOWN_SECONDS
-                    )
-
-                    batches_done = 0
-
-            logger.info(
-                "\U00002705 EDIT BATCH COMPLETE | queue=%d",
-                _caption_queue.qsize(),
-            )
-
         except asyncio.CancelledError:
             raise
-
         except Exception as exc:
             logger.exception(
                 "\U0000274c Caption worker error: %s",
                 exc,
             )
-            await asyncio.sleep(2)
-
+            # Worker errors are important; normal post activity is not.
+            try:
+                if "jobs" in locals() and jobs:
+                    await send_log_event(
+                        jobs[0]["bot"],
+                        "CAPTION WORKER ERROR",
+                        str(exc),
+                        level="ERROR",
+                    )
+            except Exception:
+                pass
+            await asyncio.sleep(1)
 
 async def start_caption_worker(application):
     global _caption_worker_task
@@ -597,16 +564,30 @@ async def start_caption_worker(application):
         )
 
     logger.info(
-        "\U0001f680 Caption worker started | "
-        "batch=%d + %d + cooldown=%ss",
+        "\U0001f680 Caption worker started | continuous batch=%d | stagger=%.2fs",
         BATCH_SIZE,
-        BATCH_SIZE,
-        COOLDOWN_SECONDS,
+        EDIT_STAGGER_SECONDS,
+    )
+
+    await send_log_event(
+        application.bot,
+        "BOT ONLINE",
+        f"Auto Caption Engine started\nBatch: {BATCH_SIZE}\nStagger: {EDIT_STAGGER_SECONDS:.2f}s",
+        level="ONLINE",
     )
 
 
 async def stop_caption_worker(application):
     global _caption_worker_task
+
+    # This catches graceful shutdowns/redeploys. A hard crash cannot send
+    # a final Telegram message, so the next BOT ONLINE event is the signal.
+    await send_log_event(
+        application.bot,
+        "BOT OFFLINE",
+        "Auto Caption Engine is shutting down/restarting.",
+        level="OFFLINE",
+    )
 
     if _caption_worker_task is not None:
         _caption_worker_task.cancel()
@@ -964,6 +945,13 @@ async def edit_channel_caption(
 
         is_caption = msg.caption is not None
 
+        logger.info(
+            "\U0001f50e TRANSFORMED | channel=%s message=%s | caption=%s",
+            channel_id,
+            message_id,
+            "yes" if is_caption else "no",
+        )
+
         job = {
             "bot": context.bot,
             "channel_id": channel_id,
@@ -1108,6 +1096,13 @@ async def handle_bot_channel_status(
                 actor_user_id,
             )
 
+            await send_log_event(
+                context.bot,
+                "CHANNEL ADDED",
+                f"Channel: {title or channel_id}\nID: {channel_id}\nOwner: {actor_user_id}",
+                level="SUCCESS",
+            )
+
         except Exception as exc:
             logger.exception(
                 "\U0000274c Channel connection failed: %s",
@@ -1131,6 +1126,13 @@ async def handle_bot_channel_status(
             logger.info(
                 "\U0001f534 Channel disconnected: %s",
                 channel_id,
+            )
+
+            await send_log_event(
+                context.bot,
+                "CHANNEL DISCONNECTED",
+                f"Channel ID: {channel_id}\nBy: {actor_user_id}",
+                level="WARNING",
             )
 
         except Exception as exc:
@@ -1232,6 +1234,13 @@ async def connect_channel(
             "Add a rule:\n"
             "<code>/addrule old -> new</code>",
             parse_mode="HTML",
+        )
+
+        await send_log_event(
+            context.bot,
+            "CHANNEL CONNECTED",
+            f"Channel: {title}\nID: {channel_id}\nBy: {user_id}",
+            level="SUCCESS",
         )
 
     except Exception as exc:
@@ -1736,9 +1745,7 @@ async def status(
         f"\U0001f4e1 <b>Log:</b> "
         f"{'\U0001f7e2 Connected' if LOG_CHANNEL_ID else '\U0001f534 Disabled'}\n"
         f"\U0001f4e6 <b>Batch:</b> "
-        f"{BATCH_SIZE} + {BATCH_SIZE}\n"
-        f"\U0001f634 <b>Cooldown:</b> "
-        f"{COOLDOWN_SECONDS:.0f}s\n"
+        f"up to {BATCH_SIZE}\n"
         f"\U0001f4cf <b>Stagger:</b> "
         f"{EDIT_STAGGER_SECONDS:.2f}s\n\n"
         "\U0001f4ca <b>Replacement Rules:</b>\n"
@@ -1826,6 +1833,13 @@ async def disconnect_channel(
         f"\U0001f194 <code>{channel_id}</code>\n\n"
         "Ab is channel ke posts process nahi honge.",
         parse_mode="HTML",
+    )
+
+    await send_log_event(
+        context.bot,
+        "CHANNEL DISCONNECTED",
+        f"Channel ID: {channel_id}\nBy: {user_id}",
+        level="WARNING",
     )
 
 
@@ -1961,7 +1975,7 @@ async def start(
         welcome_text = (
             f"\U000026a1\U0000fe0f <b>Welcome, "
             f"{html.escape(user_name)}!</b> (Admin)\n\n"
-            "\U0001f680 <b>Auto Caption Engine v6.0</b>\n"
+            "\U0001f680 <b>Auto Caption Engine v11.0</b>\n"
             "\U0001f4e1 <b>Controlled Batch + Anti-Loop System</b>\n\n"
             "\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\n\n"
             "\U0001f916 Automatically clean and edit captions "
@@ -1979,7 +1993,7 @@ async def start(
         welcome_text = (
             f"\U0001f44b <b>Hello, "
             f"{html.escape(user_name)}!</b>\n\n"
-            "\U0001f680 <b>Auto Caption Engine v6.0</b>\n"
+            "\U0001f680 <b>Auto Caption Engine v11.0</b>\n"
             "\U000026a1 Smart \U00002022 Fast \U00002022 Channel-Isolated\n\n"
             "\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\n\n"
             "\U0001f916 Automatically manage your captions.\n\n"
@@ -2032,7 +2046,7 @@ async def button_handler(
             welcome_text = (
                 f"\U000026a1\U0000fe0f <b>Welcome, "
                 f"{html.escape(user_name)}!</b> (Admin)\n\n"
-                "\U0001f680 <b>Auto Caption Engine v6.0</b>\n\n"
+                "\U0001f680 <b>Auto Caption Engine v11.0</b>\n\n"
                 "\U0001f916 Controlled caption processing.\n"
                 "\U0001f512 Channel-isolated settings.\n\n"
                 "\U0001f447 Choose an option below."
@@ -2041,7 +2055,7 @@ async def button_handler(
             welcome_text = (
                 f"\U0001f44b <b>Hello, "
                 f"{html.escape(user_name)}!</b>\n\n"
-                "\U0001f680 <b>Auto Caption Engine v6.0</b>\n\n"
+                "\U0001f680 <b>Auto Caption Engine v11.0</b>\n\n"
                 "\U0001f916 Smart automatic caption editor.\n\n"
                 "\U0001f447 Choose an option below."
             )
@@ -2159,12 +2173,10 @@ def main():
 
     app.add_error_handler(error_handler)
 
-    logger.info("\U0001f916 Auto Caption Engine v6.0 starting...")
+    logger.info("\U0001f916 Auto Caption Engine v11.0 starting...")
     logger.info(
-        "\U0001f4e6 Edit schedule: %d + %d, then %.0fs cooldown",
+        "\U0001f4e6 Edit schedule: continuous batches up to %d",
         BATCH_SIZE,
-        BATCH_SIZE,
-        COOLDOWN_SECONDS,
     )
     logger.info(
         "\U000023f1\U0000fe0f Batch stagger: %.2fs",
