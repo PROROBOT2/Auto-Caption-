@@ -162,10 +162,12 @@ BOT_USERNAME = "DG_Primebot"
 
 # Keep this at 10: fast enough for small bursts while avoiding
 # an unnecessarily aggressive number of simultaneous Telegram edits.
+# Exactly 10 caption edits can run at the same time.
+# Incoming updates are allowed to queue independently.
 CAPTION_WORKERS = 10
 
 # Retry temporary Telegram/network failures.
-MAX_EDIT_RETRIES = 4
+MAX_EDIT_RETRIES = 5
 
 # Cache each channel's settings briefly.
 CONFIG_CACHE_TTL = 30
@@ -233,7 +235,7 @@ async def edit_with_retry(edit_func, *args, **kwargs):
         except (TimedOut, NetworkError) as exc:
             last_error = exc
             wait_time = min(
-                0.5 * (2 ** (attempt - 1)),
+                0.25 * (2 ** (attempt - 1)),
                 4.0
             )
 
@@ -1261,25 +1263,14 @@ async def edit_channel_caption(
             elapsed = time.monotonic() - started
 
             logger.info(
-                f"\u2705 Done | {channel_id}/{message_id} | "
-                f"{elapsed:.2f}s"
+                f"\u2705 CAPTION EDITED | "
+                f"channel={channel_id} "
+                f"message={message_id} "
+                f"time={elapsed:.3f}s"
             )
 
-            # Logging is deliberately after the edit so it cannot delay
-            # the main caption-edit operation.
-            if LOG_CHANNEL_ID:
-                try:
-                    await edit_with_retry(
-                        context.bot.copy_message,
-                        chat_id=LOG_CHANNEL_ID,
-                        from_chat_id=channel_id,
-                        message_id=message_id
-                    )
-                except Exception as log_error:
-                    logger.warning(
-                        f"\u26a0\ufe0f Log copy failed for "
-                        f"{channel_id}/{message_id}: {log_error}"
-                    )
+            # Do not send an extra Telegram API request for logging.
+            # File/application logs already contain the processing result.
 
         except Exception as exc:
             logger.exception(
@@ -2397,7 +2388,12 @@ def main():
     app = (
         ApplicationBuilder()
         .token(TOKEN)
-        .concurrent_updates(10)
+        # Accept more incoming channel posts than the edit worker count.
+        # This prevents batch #2 from waiting behind batch #1.
+        .concurrent_updates(50)
+        # Give Telegram edit requests a healthy HTTP connection pool.
+        .connection_pool_size(30)
+        .pool_timeout(30.0)
         .build()
     )
 
