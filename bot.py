@@ -49,7 +49,7 @@ def start_dummy_server():
 
     try:
         with socketserver.TCPServer(("", port), QuietHandler) as httpd:
-            logger.info("ðŸŒ Health server started on port %s", port)
+            logger.info("\U0001f310 Health server started on port %s", port)
             httpd.serve_forever()
     except Exception as exc:
         logger.warning("Health server stopped: %s", exc)
@@ -65,11 +65,11 @@ MONGO_URI = os.environ.get("MONGO_URI", "").strip()
 BOT_USERNAME = os.environ.get("BOT_USERNAME", "DG_Primebot").strip()
 
 if not TOKEN:
-    logger.error("âŒ BOT_TOKEN environment variable missing.")
+    logger.error("\U0000274c BOT_TOKEN environment variable missing.")
     sys.exit(1)
 
 if not MONGO_URI:
-    logger.error("âŒ MONGO_URI environment variable missing.")
+    logger.error("\U0000274c MONGO_URI environment variable missing.")
     sys.exit(1)
 
 
@@ -85,7 +85,7 @@ try:
     )
     db_client.admin.command("ping")
 except Exception as exc:
-    logger.error("âŒ MongoDB connection failed: %s", exc)
+    logger.error("\U0000274c MongoDB connection failed: %s", exc)
     sys.exit(1)
 
 db = db_client["AutoCaptionBotDB"]
@@ -272,7 +272,7 @@ async def safe_edit(bot, *, channel_id, message_id, content, is_caption):
             )
 
             logger.warning(
-                "ðŸŒ Temporary Telegram/network error; "
+                "\U0001f310 Temporary Telegram/network error; "
                 "retrying in %.1fs (%d/%d): %s",
                 wait_time,
                 attempt,
@@ -316,14 +316,14 @@ async def send_edit_log(bot, job, status="SUCCESS"):
     # Keep the log compact and safe for Telegram HTML.
     preview = html.escape(final_plain[:350])
     if len(final_plain) > 350:
-        preview += "â€¦"
+        preview += "\U00002026"
 
     log_text = (
-        f"ðŸ“ <b>Caption Engine â€” {html.escape(status)}</b>\n\n"
-        f"ðŸ“¢ <b>Channel ID:</b> <code>{channel_id}</code>\n"
-        f"ðŸ†” <b>Message ID:</b> <code>{message_id}</code>\n"
-        f"ðŸ“¦ <b>Type:</b> {kind}\n\n"
-        f"ðŸ“„ <b>Result:</b>\n{preview}"
+        f"\U0001f4dd <b>Caption Engine \U00002014 {html.escape(status)}</b>\n\n"
+        f"\U0001f4e2 <b>Channel ID:</b> <code>{channel_id}</code>\n"
+        f"\U0001f194 <b>Message ID:</b> <code>{message_id}</code>\n"
+        f"\U0001f4e6 <b>Type:</b> {kind}\n\n"
+        f"\U0001f4c4 <b>Result:</b>\n{preview}"
     )
 
     try:
@@ -334,7 +334,7 @@ async def send_edit_log(bot, job, status="SUCCESS"):
             disable_web_page_preview=True,
         )
     except Exception as exc:
-        logger.warning("âš ï¸ Could not send compact edit log: %s", exc)
+        logger.warning("\U000026a0\U0000fe0f Could not send compact edit log: %s", exc)
 
 
 async def run_edit_job(job):
@@ -365,13 +365,13 @@ async def run_edit_job(job):
         )
 
         logger.info(
-            "âœ… EDITED | channel=%s message=%s time=%.2fs",
+            "\U00002705 EDITED | channel=%s message=%s time=%.2fs",
             channel_id,
             message_id,
             elapsed,
         )
 
-        # Log metadata/result only â€” never forward the actual media/file.
+        # Log metadata/result only \U00002014 never forward the actual media/file.
         await send_edit_log(
             bot,
             job,
@@ -387,7 +387,7 @@ async def run_edit_job(job):
         )
 
         logger.warning(
-            "â³ Telegram 429 | channel=%s message=%s wait=%.1fs",
+            "\U000023f3 Telegram 429 | channel=%s message=%s wait=%.1fs",
             channel_id,
             message_id,
             retry_after,
@@ -405,7 +405,7 @@ async def run_edit_job(job):
             return "ok", job, None
 
         logger.error(
-            "âŒ Telegram BadRequest | channel=%s message=%s | %s",
+            "\U0000274c Telegram BadRequest | channel=%s message=%s | %s",
             channel_id,
             message_id,
             exc,
@@ -419,7 +419,7 @@ async def run_edit_job(job):
 
     except Exception as exc:
         logger.exception(
-            "âŒ Edit failed | channel=%s message=%s | %s",
+            "\U0000274c Edit failed | channel=%s message=%s | %s",
             channel_id,
             message_id,
             exc,
@@ -446,7 +446,7 @@ async def enqueue_caption_job(job):
     if key in _pending_jobs:
         _pending_jobs[key] = job
         logger.info(
-            "â™»ï¸ Replaced pending job | channel=%s message=%s",
+            "\U0000267b\U0000fe0f Replaced pending job | channel=%s message=%s",
             job["channel_id"],
             job["message_id"],
         )
@@ -495,7 +495,7 @@ async def caption_batch_worker():
                 continue
 
             logger.info(
-                "ðŸš€ EDIT BATCH START | size=%d | queue=%d | batch_cycle=%d/%d",
+                "\U0001f680 EDIT BATCH START | size=%d | queue=%d | batch_cycle=%d/%d",
                 len(jobs),
                 _caption_queue.qsize(),
                 batches_done + 1,
@@ -542,7 +542,7 @@ async def caption_batch_worker():
                 wait_time = server_wait + 1.0
 
                 logger.warning(
-                    "ðŸ›‘ RATE LIMIT | failed=%d | waiting %.1fs",
+                    "\U0001f6d1 RATE LIMIT | failed=%d | waiting %.1fs",
                     len(rate_limited),
                     wait_time,
                 )
@@ -561,7 +561,7 @@ async def caption_batch_worker():
 
                 if batches_done >= BATCHES_BEFORE_COOLDOWN:
                     logger.info(
-                        "ðŸ˜´ Two fast batches complete. "
+                        "\U0001f634 Two fast batches complete. "
                         "Cooldown %.0fs started.",
                         COOLDOWN_SECONDS,
                     )
@@ -573,7 +573,7 @@ async def caption_batch_worker():
                     batches_done = 0
 
             logger.info(
-                "âœ… EDIT BATCH COMPLETE | queue=%d",
+                "\U00002705 EDIT BATCH COMPLETE | queue=%d",
                 _caption_queue.qsize(),
             )
 
@@ -582,7 +582,7 @@ async def caption_batch_worker():
 
         except Exception as exc:
             logger.exception(
-                "âŒ Caption worker error: %s",
+                "\U0000274c Caption worker error: %s",
                 exc,
             )
             await asyncio.sleep(2)
@@ -597,7 +597,7 @@ async def start_caption_worker(application):
         )
 
     logger.info(
-        "ðŸš€ Caption worker started | "
+        "\U0001f680 Caption worker started | "
         "batch=%d + %d + cooldown=%ss",
         BATCH_SIZE,
         BATCH_SIZE,
@@ -658,7 +658,7 @@ def default_channel_config(channel_id):
             },
         },
         "custom_header": "",
-        "custom_footer": "âš¡ Fast Download Links @DG_Contents",
+        "custom_footer": "\U000026a1 Fast Download Links @DG_Contents",
     }
 
 
@@ -687,7 +687,7 @@ def get_channel_config(channel_id):
 
     except Exception as exc:
         logger.error(
-            "âŒ MongoDB get channel config error: %s",
+            "\U0000274c MongoDB get channel config error: %s",
             exc,
         )
         return default_channel_config(channel_id)
@@ -702,7 +702,7 @@ def update_channel_config(channel_id, field_name, field_value):
         )
     except Exception as exc:
         logger.error(
-            "âŒ MongoDB update error: %s",
+            "\U0000274c MongoDB update error: %s",
             exc,
         )
     finally:
@@ -722,7 +722,7 @@ def get_selected_channel(user_id):
 
     except Exception as exc:
         logger.error(
-            "âŒ User settings error: %s",
+            "\U0000274c User settings error: %s",
             exc,
         )
         return None
@@ -738,7 +738,7 @@ def set_selected_channel(user_id, channel_id):
         return True
     except Exception as exc:
         logger.error(
-            "âŒ Selected channel update failed: %s",
+            "\U0000274c Selected channel update failed: %s",
             exc,
         )
         return False
@@ -756,7 +756,7 @@ def user_owns_channel(user_id, channel_id):
         return channel is not None
     except Exception as exc:
         logger.error(
-            "âŒ Ownership check failed: %s",
+            "\U0000274c Ownership check failed: %s",
             exc,
         )
         return False
@@ -774,7 +774,7 @@ def get_user_channels(user_id):
         )
     except Exception as exc:
         logger.error(
-            "âŒ Getting user channels failed: %s",
+            "\U0000274c Getting user channels failed: %s",
             exc,
         )
         return []
@@ -898,7 +898,7 @@ async def edit_channel_caption(
     message_id = msg.message_id
 
     logger.info(
-        "ðŸ“¨ RECEIVED | channel=%s message=%s",
+        "\U0001f4e8 RECEIVED | channel=%s message=%s",
         channel_id,
         message_id,
     )
@@ -910,7 +910,7 @@ async def edit_channel_caption(
 
         if not config or not config.get("active", True):
             logger.info(
-                "â­ï¸ Inactive channel: %s",
+                "\U000023ed\U0000fe0f Inactive channel: %s",
                 channel_id,
             )
             return
@@ -923,7 +923,7 @@ async def edit_channel_caption(
 
         if not text_to_check:
             logger.info(
-                "â­ï¸ No text/caption | %s/%s",
+                "\U000023ed\U0000fe0f No text/caption | %s/%s",
                 channel_id,
                 message_id,
             )
@@ -938,7 +938,7 @@ async def edit_channel_caption(
         # We compare plain text, not caption_html/text_html.
         if text_to_check.strip() == final_plain:
             logger.info(
-                "â­ï¸ Already correct | %s/%s",
+                "\U000023ed\U0000fe0f Already correct | %s/%s",
                 channel_id,
                 message_id,
             )
@@ -956,7 +956,7 @@ async def edit_channel_caption(
 
         if recent == final_plain:
             logger.info(
-                "â­ï¸ Already applied recently | %s/%s",
+                "\U000023ed\U0000fe0f Already applied recently | %s/%s",
                 channel_id,
                 message_id,
             )
@@ -976,7 +976,7 @@ async def edit_channel_caption(
         await enqueue_caption_job(job)
 
         logger.info(
-            "ðŸ“¥ QUEUED | %s/%s | queue=%d",
+            "\U0001f4e5 QUEUED | %s/%s | queue=%d",
             channel_id,
             message_id,
             _caption_queue.qsize(),
@@ -984,7 +984,7 @@ async def edit_channel_caption(
 
     except asyncio.QueueFull:
         logger.error(
-            "âŒ Caption queue full. "
+            "\U0000274c Caption queue full. "
             "Dropping newest job %s/%s",
             channel_id,
             message_id,
@@ -992,7 +992,7 @@ async def edit_channel_caption(
 
     except Exception as exc:
         logger.exception(
-            "âŒ Caption processing failed | %s/%s | %s",
+            "\U0000274c Caption processing failed | %s/%s | %s",
             channel_id,
             message_id,
             exc,
@@ -1023,7 +1023,7 @@ async def handle_bot_channel_status(
     channel_id = chat.id
 
     logger.info(
-        "ðŸ“¡ Channel membership | channel=%s old=%s new=%s by=%s",
+        "\U0001f4e1 Channel membership | channel=%s old=%s new=%s by=%s",
         channel_id,
         old_status,
         new_status,
@@ -1041,7 +1041,7 @@ async def handle_bot_channel_status(
 
             if bot_member.status != ChatMemberStatus.ADMINISTRATOR:
                 logger.warning(
-                    "âš ï¸ Bot is not administrator in %s",
+                    "\U000026a0\U0000fe0f Bot is not administrator in %s",
                     channel_id,
                 )
                 return
@@ -1089,28 +1089,28 @@ async def handle_bot_channel_status(
             await context.bot.send_message(
                 chat_id=actor_user_id,
                 text=(
-                    "ðŸŽ‰ <b>Thanks! Your channel has been received.</b>\n\n"
-                    f"ðŸ“¢ <b>Channel:</b> "
+                    "\U0001f389 <b>Thanks! Your channel has been received.</b>\n\n"
+                    f"\U0001f4e2 <b>Channel:</b> "
                     f"{html.escape(title or str(channel_id))}\n"
-                    f"ðŸ†” <b>Channel ID:</b> "
+                    f"\U0001f194 <b>Channel ID:</b> "
                     f"<code>{channel_id}</code>\n\n"
-                    "ðŸ”— <b>Connect it:</b>\n"
+                    "\U0001f517 <b>Connect it:</b>\n"
                     f"<code>/connect {channel_id}</code>\n\n"
-                    "âœ… After connecting, use:\n"
+                    "\U00002705 After connecting, use:\n"
                     "<code>/addrule old -> new</code>"
                 ),
                 parse_mode="HTML",
             )
 
             logger.info(
-                "âœ… Channel received: %s owner=%s",
+                "\U00002705 Channel received: %s owner=%s",
                 channel_id,
                 actor_user_id,
             )
 
         except Exception as exc:
             logger.exception(
-                "âŒ Channel connection failed: %s",
+                "\U0000274c Channel connection failed: %s",
                 exc,
             )
 
@@ -1129,13 +1129,13 @@ async def handle_bot_channel_status(
             )
 
             logger.info(
-                "ðŸ”´ Channel disconnected: %s",
+                "\U0001f534 Channel disconnected: %s",
                 channel_id,
             )
 
         except Exception as exc:
             logger.error(
-                "âŒ Channel disconnect error: %s",
+                "\U0000274c Channel disconnect error: %s",
                 exc,
             )
 
@@ -1152,7 +1152,7 @@ async def connect_channel(
 
     if not context.args:
         await update.message.reply_text(
-            "â„¹ï¸ <b>Connect Channel</b>\n\n"
+            "\U00002139\U0000fe0f <b>Connect Channel</b>\n\n"
             "Use:\n"
             "<code>/connect CHANNEL_ID</code>",
             parse_mode="HTML",
@@ -1165,7 +1165,7 @@ async def connect_channel(
         )
     except ValueError:
         await update.message.reply_text(
-            "âŒ Invalid Channel ID.",
+            "\U0000274c Invalid Channel ID.",
             parse_mode="HTML",
         )
         return
@@ -1177,7 +1177,7 @@ async def connect_channel(
 
         if not channel:
             await update.message.reply_text(
-                "âŒ <b>Channel not found.</b>\n\n"
+                "\U0000274c <b>Channel not found.</b>\n\n"
                 "Pehle bot ko channel mein Administrator banao.",
                 parse_mode="HTML",
             )
@@ -1185,7 +1185,7 @@ async def connect_channel(
 
         if channel.get("owner_user_id") != user_id:
             await update.message.reply_text(
-                "âŒ <b>Access Denied.</b>\n\n"
+                "\U0000274c <b>Access Denied.</b>\n\n"
                 "Ye channel aapke account se linked nahi hai.",
                 parse_mode="HTML",
             )
@@ -1200,7 +1200,7 @@ async def connect_channel(
 
         if bot_member.status != ChatMemberStatus.ADMINISTRATOR:
             await update.message.reply_text(
-                "âŒ Bot ko channel mein Administrator permission chahiye.",
+                "\U0000274c Bot ko channel mein Administrator permission chahiye.",
                 parse_mode="HTML",
             )
             return
@@ -1225,10 +1225,10 @@ async def connect_channel(
         )
 
         await update.message.reply_text(
-            "âœ… <b>CHANNEL CONNECTED</b>\n\n"
-            f"ðŸ“¢ <b>{html.escape(title)}</b>\n"
-            f"ðŸ†” <code>{channel_id}</code>\n\n"
-            "ðŸš€ Ab is channel ke captions automatically process honge.\n\n"
+            "\U00002705 <b>CHANNEL CONNECTED</b>\n\n"
+            f"\U0001f4e2 <b>{html.escape(title)}</b>\n"
+            f"\U0001f194 <code>{channel_id}</code>\n\n"
+            "\U0001f680 Ab is channel ke captions automatically process honge.\n\n"
             "Add a rule:\n"
             "<code>/addrule old -> new</code>",
             parse_mode="HTML",
@@ -1236,12 +1236,12 @@ async def connect_channel(
 
     except Exception as exc:
         logger.exception(
-            "âŒ Connect command failed: %s",
+            "\U0000274c Connect command failed: %s",
             exc,
         )
 
         await update.message.reply_text(
-            "âŒ <b>Connection failed.</b>\n"
+            "\U0000274c <b>Connection failed.</b>\n"
             "Channel ID aur bot permissions check karo.",
             parse_mode="HTML",
         )
@@ -1260,7 +1260,7 @@ async def channels_command(
 
     if not user_channels:
         await update.message.reply_text(
-            "ðŸ“­ <b>No Connected Channels</b>\n\n"
+            "\U0001f4ed <b>No Connected Channels</b>\n\n"
             "Pehle mujhe apne Telegram channel mein "
             "<b>Administrator</b> ke roop mein add karo.",
             parse_mode="HTML",
@@ -1269,7 +1269,7 @@ async def channels_command(
 
     selected = get_selected_channel(user_id)
 
-    message = "ðŸ“¢ <b>YOUR CONNECTED CHANNELS</b>\n\n"
+    message = "\U0001f4e2 <b>YOUR CONNECTED CHANNELS</b>\n\n"
 
     for index, channel in enumerate(
         user_channels,
@@ -1286,7 +1286,7 @@ async def channels_command(
         )
 
         selected_mark = (
-            " ðŸŸ¢ <b>SELECTED</b>"
+            " \U0001f7e2 <b>SELECTED</b>"
             if selected == channel_id
             else ""
         )
@@ -1298,15 +1298,15 @@ async def channels_command(
         )
 
         message += (
-            f"{index}. ðŸ“¢ <b>{html.escape(title)}</b>"
+            f"{index}. \U0001f4e2 <b>{html.escape(title)}</b>"
             f"{selected_mark}\n"
-            f"   ðŸ†” <code>{channel_id}</code>\n"
-            f"   ðŸ”— {html.escape(username_text)}\n\n"
+            f"   \U0001f194 <code>{channel_id}</code>\n"
+            f"   \U0001f517 {html.escape(username_text)}\n\n"
         )
 
     message += (
-        "â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”\n\n"
-        "ðŸŽ¯ <b>Select Channel:</b>\n"
+        "\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\n\n"
+        "\U0001f3af <b>Select Channel:</b>\n"
         "<code>/usechannel CHANNEL_ID</code>"
     )
 
@@ -1328,7 +1328,7 @@ async def use_channel(
 
     if not context.args:
         await update.message.reply_text(
-            "ðŸŽ¯ <b>Select Your Channel</b>\n\n"
+            "\U0001f3af <b>Select Your Channel</b>\n\n"
             "Pehle:\n"
             "<code>/channels</code>\n\n"
             "Phir:\n"
@@ -1343,7 +1343,7 @@ async def use_channel(
         )
     except ValueError:
         await update.message.reply_text(
-            "âŒ Invalid Channel ID.",
+            "\U0000274c Invalid Channel ID.",
             parse_mode="HTML",
         )
         return
@@ -1353,7 +1353,7 @@ async def use_channel(
         channel_id,
     ):
         await update.message.reply_text(
-            "â›” <b>Access Denied</b>\n\n"
+            "\U000026d4 <b>Access Denied</b>\n\n"
             "Ye channel aapke account se connected nahi hai.",
             parse_mode="HTML",
         )
@@ -1374,9 +1374,9 @@ async def use_channel(
     )
 
     await update.message.reply_text(
-        "âœ… <b>CHANNEL SELECTED</b>\n\n"
-        f"ðŸ“¢ <b>{html.escape(title)}</b>\n"
-        f"ðŸ†” <code>{channel_id}</code>\n\n"
+        "\U00002705 <b>CHANNEL SELECTED</b>\n\n"
+        f"\U0001f4e2 <b>{html.escape(title)}</b>\n"
+        f"\U0001f194 <code>{channel_id}</code>\n\n"
         "Ab settings sirf isi channel ke liye change hongi.",
         parse_mode="HTML",
     )
@@ -1393,7 +1393,7 @@ async def get_command_channel(update):
 
     if not channel_id:
         await update.message.reply_text(
-            "âš ï¸ <b>No Channel Selected</b>\n\n"
+            "\U000026a0\U0000fe0f <b>No Channel Selected</b>\n\n"
             "Pehle:\n"
             "<code>/channels</code>\n\n"
             "Phir:\n"
@@ -1407,7 +1407,7 @@ async def get_command_channel(update):
         channel_id,
     ):
         await update.message.reply_text(
-            "â›” <b>Selected Channel Invalid</b>\n\n"
+            "\U000026d4 <b>Selected Channel Invalid</b>\n\n"
             "Please <code>/channels</code> se channel dobara select karo.",
             parse_mode="HTML",
         )
@@ -1435,7 +1435,7 @@ async def add_rule(
 
     if " -> " not in raw_args:
         await update.message.reply_text(
-            "âœ¨ <b>ADD REPLACEMENT RULE</b>\n\n"
+            "\U00002728 <b>ADD REPLACEMENT RULE</b>\n\n"
             "Format:\n"
             "<code>/addrule old_text -> new_text</code>\n\n"
             "Example:\n"
@@ -1454,14 +1454,14 @@ async def add_rule(
 
     if not old_part:
         await update.message.reply_text(
-            "âŒ Old text empty nahi ho sakta.",
+            "\U0000274c Old text empty nahi ho sakta.",
             parse_mode="HTML",
         )
         return
 
     if not new_part:
         await update.message.reply_text(
-            "âŒ New text empty nahi ho sakta.",
+            "\U0000274c New text empty nahi ho sakta.",
             parse_mode="HTML",
         )
         return
@@ -1485,11 +1485,11 @@ async def add_rule(
     )
 
     await update.message.reply_text(
-        "âœ… <b>RULE ADDED & LIVE!</b>\n\n"
-        f"ðŸ” <code>{html.escape(old_part)}</code>"
-        " âž¡ï¸ "
+        "\U00002705 <b>RULE ADDED & LIVE!</b>\n\n"
+        f"\U0001f50d <code>{html.escape(old_part)}</code>"
+        " \U000027a1\U0000fe0f "
         f"<code>{html.escape(new_part)}</code>\n\n"
-        "âœ… Rule is active now.",
+        "\U00002705 Rule is active now.",
         parse_mode="HTML",
     )
 
@@ -1515,7 +1515,7 @@ async def del_rule(
 
     if not old_text:
         await update.message.reply_text(
-            "âœ¨ <b>Format:</b>\n"
+            "\U00002728 <b>Format:</b>\n"
             "<code>/delrule old_text</code>",
             parse_mode="HTML",
         )
@@ -1530,7 +1530,7 @@ async def del_rule(
 
     if old_text not in rules:
         await update.message.reply_text(
-            "âŒ <b>Rule Not Found</b>\n\n"
+            "\U0000274c <b>Rule Not Found</b>\n\n"
             "Exact old text use karo.",
             parse_mode="HTML",
         )
@@ -1550,13 +1550,13 @@ async def del_rule(
         )
 
         await update.message.reply_text(
-            "ðŸ—‘ï¸ <b>RULE DELETED</b>\n\n"
+            "\U0001f5d1\U0000fe0f <b>RULE DELETED</b>\n\n"
             f"<code>{html.escape(old_text)}</code>",
             parse_mode="HTML",
         )
     else:
         await update.message.reply_text(
-            "â›” <b>Access Denied</b>\n\n"
+            "\U000026d4 <b>Access Denied</b>\n\n"
             "Aap sirf apna rule delete kar sakte ho.",
             parse_mode="HTML",
         )
@@ -1574,7 +1574,7 @@ async def set_header(
 
     if not is_admin(user_id):
         await update.message.reply_text(
-            "â›” <b>Access Denied.</b>",
+            "\U000026d4 <b>Access Denied.</b>",
             parse_mode="HTML",
         )
         return
@@ -1595,7 +1595,7 @@ async def set_header(
     )
 
     await update.message.reply_text(
-        "ðŸ“ <b>HEADER UPDATED</b>\n\n"
+        "\U0001f4dd <b>HEADER UPDATED</b>\n\n"
         f"<code>{html.escape(header_text) or 'EMPTY'}</code>",
         parse_mode="HTML",
     )
@@ -1613,7 +1613,7 @@ async def set_footer(
 
     if not is_admin(user_id):
         await update.message.reply_text(
-            "â›” <b>Access Denied.</b>",
+            "\U000026d4 <b>Access Denied.</b>",
             parse_mode="HTML",
         )
         return
@@ -1634,7 +1634,7 @@ async def set_footer(
     )
 
     await update.message.reply_text(
-        "ðŸ“ <b>FOOTER UPDATED</b>\n\n"
+        "\U0001f4dd <b>FOOTER UPDATED</b>\n\n"
         f"<code>{html.escape(footer_text) or 'EMPTY'}</code>",
         parse_mode="HTML",
     )
@@ -1652,7 +1652,7 @@ async def clear_rules(
 
     if not is_admin(user_id):
         await update.message.reply_text(
-            "â›” <b>Access Denied.</b>",
+            "\U000026d4 <b>Access Denied.</b>",
             parse_mode="HTML",
         )
         return
@@ -1669,7 +1669,7 @@ async def clear_rules(
     )
 
     await update.message.reply_text(
-        "ðŸ§¹ <b>RULES CLEARED</b>\n\n"
+        "\U0001f9f9 <b>RULES CLEARED</b>\n\n"
         "Selected channel ke saare replacement rules clear ho gaye.",
         parse_mode="HTML",
     )
@@ -1716,32 +1716,32 @@ async def status(
     )
 
     message = (
-        "âš™ï¸ <b>AUTO CAPTION ENGINE</b>\n"
-        "ðŸ“Š <b>CHANNEL DASHBOARD</b>\n\n"
-        "â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”\n\n"
-        f"ðŸ“¢ <b>Channel:</b> "
+        "\U00002699\U0000fe0f <b>AUTO CAPTION ENGINE</b>\n"
+        "\U0001f4ca <b>CHANNEL DASHBOARD</b>\n\n"
+        "\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\n\n"
+        f"\U0001f4e2 <b>Channel:</b> "
         f"{html.escape(channel_title)}\n"
-        f"ðŸ†” <b>ID:</b> "
+        f"\U0001f194 <b>ID:</b> "
         f"<code>{channel_id}</code>\n"
     )
 
     if channel_username:
         message += (
-            f"ðŸ”— <b>Username:</b> "
+            f"\U0001f517 <b>Username:</b> "
             f"@{html.escape(channel_username)}\n"
         )
 
     message += (
         "\n"
-        f"ðŸ“¡ <b>Log:</b> "
-        f"{'ðŸŸ¢ Connected' if LOG_CHANNEL_ID else 'ðŸ”´ Disabled'}\n"
-        f"ðŸ“¦ <b>Batch:</b> "
+        f"\U0001f4e1 <b>Log:</b> "
+        f"{'\U0001f7e2 Connected' if LOG_CHANNEL_ID else '\U0001f534 Disabled'}\n"
+        f"\U0001f4e6 <b>Batch:</b> "
         f"{BATCH_SIZE} + {BATCH_SIZE}\n"
-        f"ðŸ˜´ <b>Cooldown:</b> "
+        f"\U0001f634 <b>Cooldown:</b> "
         f"{COOLDOWN_SECONDS:.0f}s\n"
-        f"ðŸ“ <b>Stagger:</b> "
+        f"\U0001f4cf <b>Stagger:</b> "
         f"{EDIT_STAGGER_SECONDS:.2f}s\n\n"
-        "ðŸ“Š <b>Replacement Rules:</b>\n"
+        "\U0001f4ca <b>Replacement Rules:</b>\n"
     )
 
     if not replacement_rules:
@@ -1751,14 +1751,14 @@ async def status(
             owner = rule_owner(rule)
 
             owner_tag = (
-                f" â€” By <code>{owner}</code>"
+                f" \U00002014 By <code>{owner}</code>"
                 if owner
                 else ""
             )
 
             message += (
-                f"ðŸ” <code>{html.escape(str(old))}</code>"
-                " âž¡ï¸ "
+                f"\U0001f50d <code>{html.escape(str(old))}</code>"
+                " \U000027a1\U0000fe0f "
                 f"<code>{html.escape(rule_value(rule))}</code>"
                 f"{owner_tag}\n"
             )
@@ -1781,7 +1781,7 @@ async def disconnect_channel(
 
     if not context.args:
         await update.message.reply_text(
-            "âœ¨ <b>Format:</b>\n"
+            "\U00002728 <b>Format:</b>\n"
             "<code>/disconnect CHANNEL_ID</code>",
             parse_mode="HTML",
         )
@@ -1793,7 +1793,7 @@ async def disconnect_channel(
         )
     except ValueError:
         await update.message.reply_text(
-            "âŒ Invalid Channel ID.",
+            "\U0000274c Invalid Channel ID.",
             parse_mode="HTML",
         )
         return
@@ -1804,7 +1804,7 @@ async def disconnect_channel(
             channel_id,
         ):
             await update.message.reply_text(
-                "â›” <b>Access Denied.</b>",
+                "\U000026d4 <b>Access Denied.</b>",
                 parse_mode="HTML",
             )
             return
@@ -1822,8 +1822,8 @@ async def disconnect_channel(
         )
 
     await update.message.reply_text(
-        "ðŸ”´ <b>CHANNEL DISCONNECTED</b>\n\n"
-        f"ðŸ†” <code>{channel_id}</code>\n\n"
+        "\U0001f534 <b>CHANNEL DISCONNECTED</b>\n\n"
+        f"\U0001f194 <code>{channel_id}</code>\n\n"
         "Ab is channel ke posts process nahi honge.",
         parse_mode="HTML",
     )
@@ -1835,28 +1835,28 @@ async def disconnect_channel(
 
 def get_help_text():
     return (
-        "â“ <b>AUTO CAPTION ENGINE â€” HELP</b>\n\n"
-        "ðŸ¤– Auto Caption Engine aapke Telegram channel "
+        "\U00002753 <b>AUTO CAPTION ENGINE \U00002014 HELP</b>\n\n"
+        "\U0001f916 Auto Caption Engine aapke Telegram channel "
         "posts/captions ko automatically clean aur edit karta hai.\n\n"
-        "â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”\n\n"
-        "âž• <b>CONNECT</b>\n\n"
+        "\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\n\n"
+        "\U00002795 <b>CONNECT</b>\n\n"
         "Bot ko channel mein Administrator banao.\n"
         "<code>/connect CHANNEL_ID</code>\n\n"
-        "ðŸ“¢ <b>CHANNELS</b>\n\n"
+        "\U0001f4e2 <b>CHANNELS</b>\n\n"
         "<code>/channels</code>\n"
         "<code>/usechannel CHANNEL_ID</code>\n\n"
-        "ðŸ”„ <b>REPLACEMENT RULE</b>\n\n"
+        "\U0001f504 <b>REPLACEMENT RULE</b>\n\n"
         "<code>/addrule MovieHub -> DG_Contents</code>\n\n"
-        "ðŸ—‘ï¸ <b>DELETE RULE</b>\n\n"
+        "\U0001f5d1\U0000fe0f <b>DELETE RULE</b>\n\n"
         "<code>/delrule MovieHub</code>\n\n"
-        "ðŸŽ¨ <b>HEADER / FOOTER</b>\n\n"
+        "\U0001f3a8 <b>HEADER / FOOTER</b>\n\n"
         "<code>/setheader Your Header</code>\n"
         "<code>/setfooter Your Footer</code>\n\n"
-        "ðŸ“Š <b>STATUS</b>\n\n"
+        "\U0001f4ca <b>STATUS</b>\n\n"
         "<code>/status</code>\n\n"
-        "ðŸ§¹ <b>CLEAR RULES</b>\n\n"
+        "\U0001f9f9 <b>CLEAR RULES</b>\n\n"
         "<code>/clear</code>\n\n"
-        "ðŸ”´ <b>DISCONNECT</b>\n\n"
+        "\U0001f534 <b>DISCONNECT</b>\n\n"
         "<code>/disconnect CHANNEL_ID</code>"
     )
 
@@ -1870,7 +1870,7 @@ async def help_command(
     keyboard = [
         [
             InlineKeyboardButton(
-                "âž• Add Me to Your Channel",
+                "\U00002795 Add Me to Your Channel",
                 url=(
                     f"https://t.me/{BOT_USERNAME}"
                     "?startchannel=true"
@@ -1879,13 +1879,13 @@ async def help_command(
         ],
         [
             InlineKeyboardButton(
-                "ðŸ‘¥ Support",
+                "\U0001f465 Support",
                 url="https://t.me/dghelps_bot",
             )
         ],
         [
             InlineKeyboardButton(
-                "ðŸ”™ Back",
+                "\U0001f519 Back",
                 callback_data="back_start",
             )
         ],
@@ -1916,7 +1916,7 @@ def get_start_keyboard():
         [
             [
                 InlineKeyboardButton(
-                    "âž• Add Me to Your Channel",
+                    "\U00002795 Add Me to Your Channel",
                     url=(
                         f"https://t.me/{BOT_USERNAME}"
                         "?startchannel=true"
@@ -1925,17 +1925,17 @@ def get_start_keyboard():
             ],
             [
                 InlineKeyboardButton(
-                    "ðŸ“¢ Channel",
+                    "\U0001f4e2 Channel",
                     url="https://t.me/dg_contents",
                 ),
                 InlineKeyboardButton(
-                    "ðŸ‘¥ Support",
+                    "\U0001f465 Support",
                     url="https://t.me/dghelps_bot",
                 ),
             ],
             [
                 InlineKeyboardButton(
-                    "â“ Help",
+                    "\U00002753 Help",
                     callback_data="help",
                 )
             ],
@@ -1959,39 +1959,39 @@ async def start(
 
     if is_admin(user_id):
         welcome_text = (
-            f"âš¡ï¸ <b>Welcome, "
+            f"\U000026a1\U0000fe0f <b>Welcome, "
             f"{html.escape(user_name)}!</b> (Admin)\n\n"
-            "ðŸš€ <b>Auto Caption Engine v6.0</b>\n"
-            "ðŸ“¡ <b>Controlled Batch + Anti-Loop System</b>\n\n"
-            "â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”\n\n"
-            "ðŸ¤– Automatically clean and edit captions "
+            "\U0001f680 <b>Auto Caption Engine v6.0</b>\n"
+            "\U0001f4e1 <b>Controlled Batch + Anti-Loop System</b>\n\n"
+            "\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\n\n"
+            "\U0001f916 Automatically clean and edit captions "
             "in your connected Telegram channels.\n\n"
-            "ðŸ”’ Every channel has separate rules/settings.\n\n"
-            "âš¡ï¸ <b>Quick Start</b>\n\n"
-            "1ï¸âƒ£ Add me to your channel as Admin\n"
-            "2ï¸âƒ£ Channel automatically registers\n"
-            "3ï¸âƒ£ Use <code>/channels</code>\n"
-            "4ï¸âƒ£ Use <code>/usechannel ID</code>\n"
-            "5ï¸âƒ£ Add rules\n\n"
-            "ðŸ‘‡ Use the buttons below."
+            "\U0001f512 Every channel has separate rules/settings.\n\n"
+            "\U000026a1\U0000fe0f <b>Quick Start</b>\n\n"
+            "1\U0000fe0f\U000020e3 Add me to your channel as Admin\n"
+            "2\U0000fe0f\U000020e3 Channel automatically registers\n"
+            "3\U0000fe0f\U000020e3 Use <code>/channels</code>\n"
+            "4\U0000fe0f\U000020e3 Use <code>/usechannel ID</code>\n"
+            "5\U0000fe0f\U000020e3 Add rules\n\n"
+            "\U0001f447 Use the buttons below."
         )
     else:
         welcome_text = (
-            f"ðŸ‘‹ <b>Hello, "
+            f"\U0001f44b <b>Hello, "
             f"{html.escape(user_name)}!</b>\n\n"
-            "ðŸš€ <b>Auto Caption Engine v6.0</b>\n"
-            "âš¡ Smart â€¢ Fast â€¢ Channel-Isolated\n\n"
-            "â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”\n\n"
-            "ðŸ¤– Automatically manage your captions.\n\n"
-            "â€¢ ðŸ”„ Replace unwanted words\n"
-            "â€¢ ðŸ§¹ Clean unwanted links/mentions\n"
-            "â€¢ ðŸŽ¨ Add custom header/footer\n"
-            "â€¢ ðŸ”’ Separate settings for every channel\n\n"
-            "ðŸš€ <b>Get Started</b>\n\n"
-            "1ï¸âƒ£ Click <b>Add Me to Your Channel</b>\n"
-            "2ï¸âƒ£ Select your channel\n"
-            "3ï¸âƒ£ Give Administrator permission\n"
-            "4ï¸âƒ£ Send <code>/connect CHANNEL_ID</code>\n\n"
+            "\U0001f680 <b>Auto Caption Engine v6.0</b>\n"
+            "\U000026a1 Smart \U00002022 Fast \U00002022 Channel-Isolated\n\n"
+            "\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\n\n"
+            "\U0001f916 Automatically manage your captions.\n\n"
+            "\U00002022 \U0001f504 Replace unwanted words\n"
+            "\U00002022 \U0001f9f9 Clean unwanted links/mentions\n"
+            "\U00002022 \U0001f3a8 Add custom header/footer\n"
+            "\U00002022 \U0001f512 Separate settings for every channel\n\n"
+            "\U0001f680 <b>Get Started</b>\n\n"
+            "1\U0000fe0f\U000020e3 Click <b>Add Me to Your Channel</b>\n"
+            "2\U0000fe0f\U000020e3 Select your channel\n"
+            "3\U0000fe0f\U000020e3 Give Administrator permission\n"
+            "4\U0000fe0f\U000020e3 Send <code>/connect CHANNEL_ID</code>\n\n"
             "Then:\n"
             "<code>/addrule old -> new</code>"
         )
@@ -2030,20 +2030,20 @@ async def button_handler(
 
         if is_admin(query.from_user.id):
             welcome_text = (
-                f"âš¡ï¸ <b>Welcome, "
+                f"\U000026a1\U0000fe0f <b>Welcome, "
                 f"{html.escape(user_name)}!</b> (Admin)\n\n"
-                "ðŸš€ <b>Auto Caption Engine v6.0</b>\n\n"
-                "ðŸ¤– Controlled caption processing.\n"
-                "ðŸ”’ Channel-isolated settings.\n\n"
-                "ðŸ‘‡ Choose an option below."
+                "\U0001f680 <b>Auto Caption Engine v6.0</b>\n\n"
+                "\U0001f916 Controlled caption processing.\n"
+                "\U0001f512 Channel-isolated settings.\n\n"
+                "\U0001f447 Choose an option below."
             )
         else:
             welcome_text = (
-                f"ðŸ‘‹ <b>Hello, "
+                f"\U0001f44b <b>Hello, "
                 f"{html.escape(user_name)}!</b>\n\n"
-                "ðŸš€ <b>Auto Caption Engine v6.0</b>\n\n"
-                "ðŸ¤– Smart automatic caption editor.\n\n"
-                "ðŸ‘‡ Choose an option below."
+                "\U0001f680 <b>Auto Caption Engine v6.0</b>\n\n"
+                "\U0001f916 Smart automatic caption editor.\n\n"
+                "\U0001f447 Choose an option below."
             )
 
         await query.edit_message_text(
@@ -2065,7 +2065,7 @@ async def error_handler(
 
     if isinstance(error, RetryAfter):
         logger.warning(
-            "â³ Global RetryAfter: %.1fs",
+            "\U000023f3 Global RetryAfter: %.1fs",
             float(error.retry_after),
         )
         return
@@ -2159,23 +2159,23 @@ def main():
 
     app.add_error_handler(error_handler)
 
-    logger.info("ðŸ¤– Auto Caption Engine v6.0 starting...")
+    logger.info("\U0001f916 Auto Caption Engine v6.0 starting...")
     logger.info(
-        "ðŸ“¦ Edit schedule: %d + %d, then %.0fs cooldown",
+        "\U0001f4e6 Edit schedule: %d + %d, then %.0fs cooldown",
         BATCH_SIZE,
         BATCH_SIZE,
         COOLDOWN_SECONDS,
     )
     logger.info(
-        "â±ï¸ Batch stagger: %.2fs",
+        "\U000023f1\U0000fe0f Batch stagger: %.2fs",
         EDIT_STAGGER_SECONDS,
     )
     logger.info(
-        "ðŸ‘‘ Admin IDs: %s",
+        "\U0001f451 Admin IDs: %s",
         ADMIN_IDS,
     )
     logger.info(
-        "ðŸ¤– Bot username: @%s",
+        "\U0001f916 Bot username: @%s",
         BOT_USERNAME,
     )
 
