@@ -49,7 +49,7 @@ def start_dummy_server():
 
     try:
         with socketserver.TCPServer(("", port), QuietHandler) as httpd:
-            logger.info("\U0001f310 Health server started on port %s", port)
+            logger.info("ðŸŒ Health server started on port %s", port)
             httpd.serve_forever()
     except Exception as exc:
         logger.warning("Health server stopped: %s", exc)
@@ -65,11 +65,11 @@ MONGO_URI = os.environ.get("MONGO_URI", "").strip()
 BOT_USERNAME = os.environ.get("BOT_USERNAME", "DG_Primebot").strip()
 
 if not TOKEN:
-    logger.error("\U0000274c BOT_TOKEN environment variable missing.")
+    logger.error("âŒ BOT_TOKEN environment variable missing.")
     sys.exit(1)
 
 if not MONGO_URI:
-    logger.error("\U0000274c MONGO_URI environment variable missing.")
+    logger.error("âŒ MONGO_URI environment variable missing.")
     sys.exit(1)
 
 
@@ -85,7 +85,7 @@ try:
     )
     db_client.admin.command("ping")
 except Exception as exc:
-    logger.error("\U0000274c MongoDB connection failed: %s", exc)
+    logger.error("âŒ MongoDB connection failed: %s", exc)
     sys.exit(1)
 
 db = db_client["AutoCaptionBotDB"]
@@ -147,20 +147,24 @@ except ValueError:
 # which prevents that loop.
 #
 # Queue behavior:
-#   Up to 10 jobs -> fast batch -> continuous
+#   10 jobs -> fast batch
+#   10 jobs -> fast batch
+#   40 sec cooldown
+#   repeat
 #
-# There is NO artificial cooldown. If Telegram sends RetryAfter,
-# the exact server wait is respected.
+# If Telegram sends RetryAfter, the exact server wait is respected
+# instead of blindly sending requests again.
 # ============================================================
 
 BATCH_SIZE = 10
+BATCHES_BEFORE_COOLDOWN = 2
+COOLDOWN_SECONDS = 40.0
 
-# No artificial cooldown. Jobs are processed continuously.
-# Telegram RetryAfter is respected only when Telegram actually
-# asks us to slow down.
-EDIT_STAGGER_SECONDS = 0.05
+# Small stagger makes a 10-job burst less aggressive while still
+# keeping the batch very fast.
+EDIT_STAGGER_SECONDS = 0.12
 
-MAX_EDIT_RETRIES = 3
+MAX_EDIT_RETRIES = 5
 
 QUEUE_MAX_SIZE = 5000
 CONFIG_CACHE_TTL = 30.0
@@ -247,10 +251,6 @@ async def safe_edit(bot, *, channel_id, message_id, content, is_caption):
                     message_id=message_id,
                     caption=content,
                     parse_mode="HTML",
-                    read_timeout=10.0,
-                    write_timeout=10.0,
-                    connect_timeout=5.0,
-                    pool_timeout=5.0,
                 )
 
             return await bot.edit_message_text(
@@ -258,10 +258,6 @@ async def safe_edit(bot, *, channel_id, message_id, content, is_caption):
                 message_id=message_id,
                 text=content,
                 parse_mode="HTML",
-                read_timeout=10.0,
-                write_timeout=10.0,
-                connect_timeout=5.0,
-                pool_timeout=5.0,
             )
 
         except RetryAfter:
@@ -272,11 +268,11 @@ async def safe_edit(bot, *, channel_id, message_id, content, is_caption):
 
             wait_time = min(
                 0.5 * (2 ** (attempt - 1)),
-                2.0,
+                5.0,
             )
 
             logger.warning(
-                "\U0001f310 Temporary Telegram/network error; "
+                "ðŸŒ Temporary Telegram/network error; "
                 "retrying in %.1fs (%d/%d): %s",
                 wait_time,
                 attempt,
@@ -301,31 +297,33 @@ async def safe_edit(bot, *, channel_id, message_id, content, is_caption):
 
 
 
-async def send_log_event(bot, title, details="", level="INFO"):
-    """Send ONLY important events to LOG_CHANNEL_ID.
+async def send_important_log(bot, title, body="", level="INFO"):
+    """Send ONLY important operational events to the Telegram log channel.
 
-    Intentionally does NOT log every received/queued/edited post.
-    This keeps the Telegram log channel clean and useful.
+    Routine caption processing is intentionally NOT logged here.
+    No original media/file is ever copied to the log channel.
     """
     if not LOG_CHANNEL_ID:
         return
 
     icons = {
-        "INFO": "\U0001f7e2",
-        "SUCCESS": "\U00002705",
-        "WARNING": "\U000026a0\U0000fe0f",
-        "ERROR": "\U0000274c",
-        "ONLINE": "\U0001f916",
-        "OFFLINE": "\U0001f534",
+        "INFO": "â„¹ï¸",
+        "SUCCESS": "âœ…",
+        "WARNING": "âš ï¸",
+        "ERROR": "âŒ",
+        "START": "ðŸŸ¢",
+        "STOP": "ðŸ”´",
+        "USER": "ðŸ‘¤",
+        "CHANNEL": "ðŸ“¢",
     }
 
-    icon = icons.get(level, "\U0001f4cc")
+    icon = icons.get(level, "â„¹ï¸")
     safe_title = html.escape(str(title))
-    safe_details = html.escape(str(details)) if details else ""
+    safe_body = html.escape(str(body))
 
     text = f"{icon} <b>{safe_title}</b>"
-    if safe_details:
-        text += f"\n\n{safe_details}"
+    if body:
+        text += f"\n\n{safe_body}"
 
     try:
         await bot.send_message(
@@ -335,10 +333,38 @@ async def send_log_event(bot, title, details="", level="INFO"):
             disable_web_page_preview=True,
         )
     except Exception as exc:
-        logger.warning(
-            "Could not send important log event: %s",
-            exc,
+        logger.warning("âš ï¸ Important log send failed: %s", exc)
+
+
+async def log_new_user(bot, user):
+    """Log only the first /start from a user."""
+    if not user:
+        return
+
+    try:
+        result = await asyncio.to_thread(
+            users_col.update_one,
+            {"_id": str(user.id)},
+            {
+                "$setOnInsert": {
+                    "_id": str(user.id),
+                    "created_at": time.time(),
+                }
+            },
+            upsert=True,
         )
+
+        if result.upserted_id is not None:
+            name = user.first_name or "User"
+            username = f"@{user.username}" if user.username else "No username"
+            await send_important_log(
+                bot,
+                "NEW USER",
+                f"Name: {name}\nUsername: {username}\nUser ID: {user.id}",
+                "USER",
+            )
+    except Exception as exc:
+        logger.warning("âš ï¸ New-user tracking failed: %s", exc)
 
 
 async def run_edit_job(job):
@@ -369,17 +395,10 @@ async def run_edit_job(job):
         )
 
         logger.info(
-            "\U00002705 EDITED | channel=%s message=%s time=%.2fs",
+            "âœ… EDITED | channel=%s message=%s time=%.2fs",
             channel_id,
             message_id,
             elapsed,
-        )
-
-        # Log metadata/result only \U00002014 never forward the actual media/file.
-        await send_edit_log(
-            bot,
-            job,
-            status="SUCCESS",
         )
 
         return "ok", job, None
@@ -391,7 +410,7 @@ async def run_edit_job(job):
         )
 
         logger.warning(
-            "\U000023f3 Telegram 429 | channel=%s message=%s wait=%.1fs",
+            "â³ Telegram 429 | channel=%s message=%s wait=%.1fs",
             channel_id,
             message_id,
             retry_after,
@@ -409,31 +428,31 @@ async def run_edit_job(job):
             return "ok", job, None
 
         logger.error(
-            "\U0000274c Telegram BadRequest | channel=%s message=%s | %s",
+            "âŒ Telegram BadRequest | channel=%s message=%s | %s",
             channel_id,
             message_id,
             exc,
         )
-        await send_log_event(
+        await send_important_log(
             bot,
             "CAPTION EDIT FAILED",
             f"Channel: {channel_id}\nMessage: {message_id}\nError: {exc}",
-            level="ERROR",
+            "ERROR",
         )
         return "failed", job, None
 
     except Exception as exc:
         logger.exception(
-            "\U0000274c Edit failed | channel=%s message=%s | %s",
+            "âŒ Edit failed | channel=%s message=%s | %s",
             channel_id,
             message_id,
             exc,
         )
-        await send_log_event(
+        await send_important_log(
             bot,
             "CAPTION EDIT FAILED",
             f"Channel: {channel_id}\nMessage: {message_id}\nError: {exc}",
-            level="ERROR",
+            "ERROR",
         )
         return "failed", job, None
 
@@ -452,7 +471,7 @@ async def enqueue_caption_job(job):
     if key in _pending_jobs:
         _pending_jobs[key] = job
         logger.info(
-            "\U0000267b\U0000fe0f Replaced pending job | channel=%s message=%s",
+            "â™»ï¸ Replaced pending job | channel=%s message=%s",
             job["channel_id"],
             job["message_id"],
         )
@@ -463,20 +482,33 @@ async def enqueue_caption_job(job):
 
 
 async def caption_batch_worker():
-    """Continuously process up to BATCH_SIZE edits without an artificial cooldown."""
+    """
+    Main controlled edit worker.
+
+    Two batches of 10 are processed quickly.
+    Then the worker sleeps for 40 seconds.
+    Telegram RetryAfter always overrides this schedule.
+    """
+
+    batches_done = 0
 
     while True:
         try:
             first_key = await _caption_queue.get()
+
             keys = [first_key]
 
+            # Collect up to BATCH_SIZE jobs that are already waiting.
             for _ in range(BATCH_SIZE - 1):
                 try:
-                    keys.append(_caption_queue.get_nowait())
+                    keys.append(
+                        _caption_queue.get_nowait()
+                    )
                 except asyncio.QueueEmpty:
                     break
 
             jobs = []
+
             for key in keys:
                 job = _pending_jobs.pop(key, None)
                 if job is not None:
@@ -488,72 +520,105 @@ async def caption_batch_worker():
                 continue
 
             logger.info(
-                "\U0001f680 EDIT BATCH | size=%d | queue=%d",
+                "ðŸš€ EDIT BATCH START | size=%d | queue=%d | batch_cycle=%d/%d",
                 len(jobs),
                 _caption_queue.qsize(),
+                batches_done + 1,
+                BATCHES_BEFORE_COOLDOWN,
             )
 
+            # Stagger jobs slightly. They still finish very quickly,
+            # but this is safer than firing all 10 at the exact same
+            # millisecond.
             async def delayed_job(index, job):
                 if index:
-                    await asyncio.sleep(EDIT_STAGGER_SECONDS * index)
+                    await asyncio.sleep(
+                        EDIT_STAGGER_SECONDS * index
+                    )
                 return await run_edit_job(job)
 
             results = await asyncio.gather(
-                *[delayed_job(i, job) for i, job in enumerate(jobs)],
+                *[
+                    delayed_job(index, job)
+                    for index, job in enumerate(jobs)
+                ],
                 return_exceptions=False,
             )
 
-            for _ in keys:
-                _caption_queue.task_done()
-
-            # Only jobs that Telegram explicitly rate-limited are retried.
-            # A rate limit must not create an artificial 40-second pause.
             rate_limited = [
                 (result[1], result[2])
                 for result in results
                 if result[0] == "rate_limit"
             ]
 
+            # Mark queue tasks complete for the jobs removed above.
+            for _ in keys:
+                _caption_queue.task_done()
+
             if rate_limited:
-                server_wait = max(wait for _, wait in rate_limited)
-                wait_time = server_wait + 0.25
+                # Respect the largest RetryAfter returned by Telegram.
+                server_wait = max(
+                    wait
+                    for _, wait in rate_limited
+                )
+
+                # Tiny safety margin so we don't hit the limit again
+                # exactly at the boundary.
+                wait_time = server_wait + 1.0
 
                 logger.warning(
-                    "\U0001f6d1 Telegram rate limit; retrying %d job(s) in %.1fs",
+                    "ðŸ›‘ RATE LIMIT | failed=%d | waiting %.1fs",
                     len(rate_limited),
                     wait_time,
                 )
 
-                await send_log_event(
-                    jobs[0]["bot"],
+                await send_important_log(
+                    rate_limited[0][0]["bot"],
                     "TELEGRAM RATE LIMIT",
-                    f"{len(rate_limited)} edit(s) delayed by Telegram\nWait: {wait_time:.1f}s",
-                    level="WARNING",
+                    f"{len(rate_limited)} edit job(s) delayed. Waiting {wait_time:.1f}s.",
+                    "WARNING",
                 )
 
                 await asyncio.sleep(wait_time)
+
+                # Requeue only jobs that actually received 429.
                 for job, _ in rate_limited:
                     await enqueue_caption_job(job)
 
+                # Restart the two-batch cycle after a server rate limit.
+                batches_done = 0
+
+            else:
+                batches_done += 1
+
+                if batches_done >= BATCHES_BEFORE_COOLDOWN:
+                    logger.info(
+                        "ðŸ˜´ Two fast batches complete. "
+                        "Cooldown %.0fs started.",
+                        COOLDOWN_SECONDS,
+                    )
+
+                    await asyncio.sleep(
+                        COOLDOWN_SECONDS
+                    )
+
+                    batches_done = 0
+
+            logger.info(
+                "âœ… EDIT BATCH COMPLETE | queue=%d",
+                _caption_queue.qsize(),
+            )
+
         except asyncio.CancelledError:
             raise
+
         except Exception as exc:
             logger.exception(
-                "\U0000274c Caption worker error: %s",
+                "âŒ Caption worker error: %s",
                 exc,
             )
-            # Worker errors are important; normal post activity is not.
-            try:
-                if "jobs" in locals() and jobs:
-                    await send_log_event(
-                        jobs[0]["bot"],
-                        "CAPTION WORKER ERROR",
-                        str(exc),
-                        level="ERROR",
-                    )
-            except Exception:
-                pass
-            await asyncio.sleep(1)
+            await asyncio.sleep(2)
+
 
 async def start_caption_worker(application):
     global _caption_worker_task
@@ -564,29 +629,29 @@ async def start_caption_worker(application):
         )
 
     logger.info(
-        "\U0001f680 Caption worker started | continuous batch=%d | stagger=%.2fs",
+        "ðŸš€ Caption worker started | "
+        "batch=%d + %d + cooldown=%ss",
         BATCH_SIZE,
-        EDIT_STAGGER_SECONDS,
+        BATCH_SIZE,
+        COOLDOWN_SECONDS,
     )
 
-    await send_log_event(
+    await send_important_log(
         application.bot,
         "BOT ONLINE",
-        f"Auto Caption Engine started\nBatch: {BATCH_SIZE}\nStagger: {EDIT_STAGGER_SECONDS:.2f}s",
-        level="ONLINE",
+        f"Caption engine started successfully.\nBatch: {BATCH_SIZE} + {BATCH_SIZE}\nCooldown: {COOLDOWN_SECONDS:.0f}s",
+        "START",
     )
 
 
 async def stop_caption_worker(application):
     global _caption_worker_task
 
-    # This catches graceful shutdowns/redeploys. A hard crash cannot send
-    # a final Telegram message, so the next BOT ONLINE event is the signal.
-    await send_log_event(
+    await send_important_log(
         application.bot,
         "BOT OFFLINE",
-        "Auto Caption Engine is shutting down/restarting.",
-        level="OFFLINE",
+        "Caption engine is shutting down.",
+        "STOP",
     )
 
     if _caption_worker_task is not None:
@@ -639,7 +704,7 @@ def default_channel_config(channel_id):
             },
         },
         "custom_header": "",
-        "custom_footer": "\U000026a1 Fast Download Links @DG_Contents",
+        "custom_footer": "âš¡ Fast Download Links @DG_Contents",
     }
 
 
@@ -668,7 +733,7 @@ def get_channel_config(channel_id):
 
     except Exception as exc:
         logger.error(
-            "\U0000274c MongoDB get channel config error: %s",
+            "âŒ MongoDB get channel config error: %s",
             exc,
         )
         return default_channel_config(channel_id)
@@ -683,7 +748,7 @@ def update_channel_config(channel_id, field_name, field_value):
         )
     except Exception as exc:
         logger.error(
-            "\U0000274c MongoDB update error: %s",
+            "âŒ MongoDB update error: %s",
             exc,
         )
     finally:
@@ -703,7 +768,7 @@ def get_selected_channel(user_id):
 
     except Exception as exc:
         logger.error(
-            "\U0000274c User settings error: %s",
+            "âŒ User settings error: %s",
             exc,
         )
         return None
@@ -719,7 +784,7 @@ def set_selected_channel(user_id, channel_id):
         return True
     except Exception as exc:
         logger.error(
-            "\U0000274c Selected channel update failed: %s",
+            "âŒ Selected channel update failed: %s",
             exc,
         )
         return False
@@ -737,7 +802,7 @@ def user_owns_channel(user_id, channel_id):
         return channel is not None
     except Exception as exc:
         logger.error(
-            "\U0000274c Ownership check failed: %s",
+            "âŒ Ownership check failed: %s",
             exc,
         )
         return False
@@ -755,7 +820,7 @@ def get_user_channels(user_id):
         )
     except Exception as exc:
         logger.error(
-            "\U0000274c Getting user channels failed: %s",
+            "âŒ Getting user channels failed: %s",
             exc,
         )
         return []
@@ -879,7 +944,7 @@ async def edit_channel_caption(
     message_id = msg.message_id
 
     logger.info(
-        "\U0001f4e8 RECEIVED | channel=%s message=%s",
+        "ðŸ“¨ RECEIVED | channel=%s message=%s",
         channel_id,
         message_id,
     )
@@ -891,7 +956,7 @@ async def edit_channel_caption(
 
         if not config or not config.get("active", True):
             logger.info(
-                "\U000023ed\U0000fe0f Inactive channel: %s",
+                "â­ï¸ Inactive channel: %s",
                 channel_id,
             )
             return
@@ -904,7 +969,7 @@ async def edit_channel_caption(
 
         if not text_to_check:
             logger.info(
-                "\U000023ed\U0000fe0f No text/caption | %s/%s",
+                "â­ï¸ No text/caption | %s/%s",
                 channel_id,
                 message_id,
             )
@@ -919,7 +984,7 @@ async def edit_channel_caption(
         # We compare plain text, not caption_html/text_html.
         if text_to_check.strip() == final_plain:
             logger.info(
-                "\U000023ed\U0000fe0f Already correct | %s/%s",
+                "â­ï¸ Already correct | %s/%s",
                 channel_id,
                 message_id,
             )
@@ -937,20 +1002,13 @@ async def edit_channel_caption(
 
         if recent == final_plain:
             logger.info(
-                "\U000023ed\U0000fe0f Already applied recently | %s/%s",
+                "â­ï¸ Already applied recently | %s/%s",
                 channel_id,
                 message_id,
             )
             return
 
         is_caption = msg.caption is not None
-
-        logger.info(
-            "\U0001f50e TRANSFORMED | channel=%s message=%s | caption=%s",
-            channel_id,
-            message_id,
-            "yes" if is_caption else "no",
-        )
 
         job = {
             "bot": context.bot,
@@ -964,7 +1022,7 @@ async def edit_channel_caption(
         await enqueue_caption_job(job)
 
         logger.info(
-            "\U0001f4e5 QUEUED | %s/%s | queue=%d",
+            "ðŸ“¥ QUEUED | %s/%s | queue=%d",
             channel_id,
             message_id,
             _caption_queue.qsize(),
@@ -972,7 +1030,7 @@ async def edit_channel_caption(
 
     except asyncio.QueueFull:
         logger.error(
-            "\U0000274c Caption queue full. "
+            "âŒ Caption queue full. "
             "Dropping newest job %s/%s",
             channel_id,
             message_id,
@@ -980,7 +1038,7 @@ async def edit_channel_caption(
 
     except Exception as exc:
         logger.exception(
-            "\U0000274c Caption processing failed | %s/%s | %s",
+            "âŒ Caption processing failed | %s/%s | %s",
             channel_id,
             message_id,
             exc,
@@ -1011,7 +1069,7 @@ async def handle_bot_channel_status(
     channel_id = chat.id
 
     logger.info(
-        "\U0001f4e1 Channel membership | channel=%s old=%s new=%s by=%s",
+        "ðŸ“¡ Channel membership | channel=%s old=%s new=%s by=%s",
         channel_id,
         old_status,
         new_status,
@@ -1029,7 +1087,7 @@ async def handle_bot_channel_status(
 
             if bot_member.status != ChatMemberStatus.ADMINISTRATOR:
                 logger.warning(
-                    "\U000026a0\U0000fe0f Bot is not administrator in %s",
+                    "âš ï¸ Bot is not administrator in %s",
                     channel_id,
                 )
                 return
@@ -1077,35 +1135,35 @@ async def handle_bot_channel_status(
             await context.bot.send_message(
                 chat_id=actor_user_id,
                 text=(
-                    "\U0001f389 <b>Thanks! Your channel has been received.</b>\n\n"
-                    f"\U0001f4e2 <b>Channel:</b> "
+                    "ðŸŽ‰ <b>Thanks! Your channel has been received.</b>\n\n"
+                    f"ðŸ“¢ <b>Channel:</b> "
                     f"{html.escape(title or str(channel_id))}\n"
-                    f"\U0001f194 <b>Channel ID:</b> "
+                    f"ðŸ†” <b>Channel ID:</b> "
                     f"<code>{channel_id}</code>\n\n"
-                    "\U0001f517 <b>Connect it:</b>\n"
+                    "ðŸ”— <b>Connect it:</b>\n"
                     f"<code>/connect {channel_id}</code>\n\n"
-                    "\U00002705 After connecting, use:\n"
+                    "âœ… After connecting, use:\n"
                     "<code>/addrule old -> new</code>"
                 ),
                 parse_mode="HTML",
             )
 
+            await send_important_log(
+                context.bot,
+                "CHANNEL CONNECTED",
+                f"Channel: {title or channel_id}\nChannel ID: {channel_id}\nOwner ID: {actor_user_id}",
+                "CHANNEL",
+            )
+
             logger.info(
-                "\U00002705 Channel received: %s owner=%s",
+                "âœ… Channel received: %s owner=%s",
                 channel_id,
                 actor_user_id,
             )
 
-            await send_log_event(
-                context.bot,
-                "CHANNEL ADDED",
-                f"Channel: {title or channel_id}\nID: {channel_id}\nOwner: {actor_user_id}",
-                level="SUCCESS",
-            )
-
         except Exception as exc:
             logger.exception(
-                "\U0000274c Channel connection failed: %s",
+                "âŒ Channel connection failed: %s",
                 exc,
             )
 
@@ -1123,21 +1181,21 @@ async def handle_bot_channel_status(
                 channel_id
             )
 
-            logger.info(
-                "\U0001f534 Channel disconnected: %s",
-                channel_id,
-            )
-
-            await send_log_event(
+            await send_important_log(
                 context.bot,
                 "CHANNEL DISCONNECTED",
-                f"Channel ID: {channel_id}\nBy: {actor_user_id}",
-                level="WARNING",
+                f"Channel ID: {channel_id}",
+                "STOP",
+            )
+
+            logger.info(
+                "ðŸ”´ Channel disconnected: %s",
+                channel_id,
             )
 
         except Exception as exc:
             logger.error(
-                "\U0000274c Channel disconnect error: %s",
+                "âŒ Channel disconnect error: %s",
                 exc,
             )
 
@@ -1154,7 +1212,7 @@ async def connect_channel(
 
     if not context.args:
         await update.message.reply_text(
-            "\U00002139\U0000fe0f <b>Connect Channel</b>\n\n"
+            "â„¹ï¸ <b>Connect Channel</b>\n\n"
             "Use:\n"
             "<code>/connect CHANNEL_ID</code>",
             parse_mode="HTML",
@@ -1167,7 +1225,7 @@ async def connect_channel(
         )
     except ValueError:
         await update.message.reply_text(
-            "\U0000274c Invalid Channel ID.",
+            "âŒ Invalid Channel ID.",
             parse_mode="HTML",
         )
         return
@@ -1179,7 +1237,7 @@ async def connect_channel(
 
         if not channel:
             await update.message.reply_text(
-                "\U0000274c <b>Channel not found.</b>\n\n"
+                "âŒ <b>Channel not found.</b>\n\n"
                 "Pehle bot ko channel mein Administrator banao.",
                 parse_mode="HTML",
             )
@@ -1187,7 +1245,7 @@ async def connect_channel(
 
         if channel.get("owner_user_id") != user_id:
             await update.message.reply_text(
-                "\U0000274c <b>Access Denied.</b>\n\n"
+                "âŒ <b>Access Denied.</b>\n\n"
                 "Ye channel aapke account se linked nahi hai.",
                 parse_mode="HTML",
             )
@@ -1202,7 +1260,7 @@ async def connect_channel(
 
         if bot_member.status != ChatMemberStatus.ADMINISTRATOR:
             await update.message.reply_text(
-                "\U0000274c Bot ko channel mein Administrator permission chahiye.",
+                "âŒ Bot ko channel mein Administrator permission chahiye.",
                 parse_mode="HTML",
             )
             return
@@ -1227,30 +1285,23 @@ async def connect_channel(
         )
 
         await update.message.reply_text(
-            "\U00002705 <b>CHANNEL CONNECTED</b>\n\n"
-            f"\U0001f4e2 <b>{html.escape(title)}</b>\n"
-            f"\U0001f194 <code>{channel_id}</code>\n\n"
-            "\U0001f680 Ab is channel ke captions automatically process honge.\n\n"
+            "âœ… <b>CHANNEL CONNECTED</b>\n\n"
+            f"ðŸ“¢ <b>{html.escape(title)}</b>\n"
+            f"ðŸ†” <code>{channel_id}</code>\n\n"
+            "ðŸš€ Ab is channel ke captions automatically process honge.\n\n"
             "Add a rule:\n"
             "<code>/addrule old -> new</code>",
             parse_mode="HTML",
         )
 
-        await send_log_event(
-            context.bot,
-            "CHANNEL CONNECTED",
-            f"Channel: {title}\nID: {channel_id}\nBy: {user_id}",
-            level="SUCCESS",
-        )
-
     except Exception as exc:
         logger.exception(
-            "\U0000274c Connect command failed: %s",
+            "âŒ Connect command failed: %s",
             exc,
         )
 
         await update.message.reply_text(
-            "\U0000274c <b>Connection failed.</b>\n"
+            "âŒ <b>Connection failed.</b>\n"
             "Channel ID aur bot permissions check karo.",
             parse_mode="HTML",
         )
@@ -1269,7 +1320,7 @@ async def channels_command(
 
     if not user_channels:
         await update.message.reply_text(
-            "\U0001f4ed <b>No Connected Channels</b>\n\n"
+            "ðŸ“­ <b>No Connected Channels</b>\n\n"
             "Pehle mujhe apne Telegram channel mein "
             "<b>Administrator</b> ke roop mein add karo.",
             parse_mode="HTML",
@@ -1278,7 +1329,7 @@ async def channels_command(
 
     selected = get_selected_channel(user_id)
 
-    message = "\U0001f4e2 <b>YOUR CONNECTED CHANNELS</b>\n\n"
+    message = "ðŸ“¢ <b>YOUR CONNECTED CHANNELS</b>\n\n"
 
     for index, channel in enumerate(
         user_channels,
@@ -1295,7 +1346,7 @@ async def channels_command(
         )
 
         selected_mark = (
-            " \U0001f7e2 <b>SELECTED</b>"
+            " ðŸŸ¢ <b>SELECTED</b>"
             if selected == channel_id
             else ""
         )
@@ -1307,15 +1358,15 @@ async def channels_command(
         )
 
         message += (
-            f"{index}. \U0001f4e2 <b>{html.escape(title)}</b>"
+            f"{index}. ðŸ“¢ <b>{html.escape(title)}</b>"
             f"{selected_mark}\n"
-            f"   \U0001f194 <code>{channel_id}</code>\n"
-            f"   \U0001f517 {html.escape(username_text)}\n\n"
+            f"   ðŸ†” <code>{channel_id}</code>\n"
+            f"   ðŸ”— {html.escape(username_text)}\n\n"
         )
 
     message += (
-        "\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\n\n"
-        "\U0001f3af <b>Select Channel:</b>\n"
+        "â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”\n\n"
+        "ðŸŽ¯ <b>Select Channel:</b>\n"
         "<code>/usechannel CHANNEL_ID</code>"
     )
 
@@ -1337,7 +1388,7 @@ async def use_channel(
 
     if not context.args:
         await update.message.reply_text(
-            "\U0001f3af <b>Select Your Channel</b>\n\n"
+            "ðŸŽ¯ <b>Select Your Channel</b>\n\n"
             "Pehle:\n"
             "<code>/channels</code>\n\n"
             "Phir:\n"
@@ -1352,7 +1403,7 @@ async def use_channel(
         )
     except ValueError:
         await update.message.reply_text(
-            "\U0000274c Invalid Channel ID.",
+            "âŒ Invalid Channel ID.",
             parse_mode="HTML",
         )
         return
@@ -1362,7 +1413,7 @@ async def use_channel(
         channel_id,
     ):
         await update.message.reply_text(
-            "\U000026d4 <b>Access Denied</b>\n\n"
+            "â›” <b>Access Denied</b>\n\n"
             "Ye channel aapke account se connected nahi hai.",
             parse_mode="HTML",
         )
@@ -1383,9 +1434,9 @@ async def use_channel(
     )
 
     await update.message.reply_text(
-        "\U00002705 <b>CHANNEL SELECTED</b>\n\n"
-        f"\U0001f4e2 <b>{html.escape(title)}</b>\n"
-        f"\U0001f194 <code>{channel_id}</code>\n\n"
+        "âœ… <b>CHANNEL SELECTED</b>\n\n"
+        f"ðŸ“¢ <b>{html.escape(title)}</b>\n"
+        f"ðŸ†” <code>{channel_id}</code>\n\n"
         "Ab settings sirf isi channel ke liye change hongi.",
         parse_mode="HTML",
     )
@@ -1402,7 +1453,7 @@ async def get_command_channel(update):
 
     if not channel_id:
         await update.message.reply_text(
-            "\U000026a0\U0000fe0f <b>No Channel Selected</b>\n\n"
+            "âš ï¸ <b>No Channel Selected</b>\n\n"
             "Pehle:\n"
             "<code>/channels</code>\n\n"
             "Phir:\n"
@@ -1416,7 +1467,7 @@ async def get_command_channel(update):
         channel_id,
     ):
         await update.message.reply_text(
-            "\U000026d4 <b>Selected Channel Invalid</b>\n\n"
+            "â›” <b>Selected Channel Invalid</b>\n\n"
             "Please <code>/channels</code> se channel dobara select karo.",
             parse_mode="HTML",
         )
@@ -1444,7 +1495,7 @@ async def add_rule(
 
     if " -> " not in raw_args:
         await update.message.reply_text(
-            "\U00002728 <b>ADD REPLACEMENT RULE</b>\n\n"
+            "âœ¨ <b>ADD REPLACEMENT RULE</b>\n\n"
             "Format:\n"
             "<code>/addrule old_text -> new_text</code>\n\n"
             "Example:\n"
@@ -1463,14 +1514,14 @@ async def add_rule(
 
     if not old_part:
         await update.message.reply_text(
-            "\U0000274c Old text empty nahi ho sakta.",
+            "âŒ Old text empty nahi ho sakta.",
             parse_mode="HTML",
         )
         return
 
     if not new_part:
         await update.message.reply_text(
-            "\U0000274c New text empty nahi ho sakta.",
+            "âŒ New text empty nahi ho sakta.",
             parse_mode="HTML",
         )
         return
@@ -1494,11 +1545,11 @@ async def add_rule(
     )
 
     await update.message.reply_text(
-        "\U00002705 <b>RULE ADDED & LIVE!</b>\n\n"
-        f"\U0001f50d <code>{html.escape(old_part)}</code>"
-        " \U000027a1\U0000fe0f "
+        "âœ… <b>RULE ADDED & LIVE!</b>\n\n"
+        f"ðŸ” <code>{html.escape(old_part)}</code>"
+        " âž¡ï¸ "
         f"<code>{html.escape(new_part)}</code>\n\n"
-        "\U00002705 Rule is active now.",
+        "âœ… Rule is active now.",
         parse_mode="HTML",
     )
 
@@ -1524,7 +1575,7 @@ async def del_rule(
 
     if not old_text:
         await update.message.reply_text(
-            "\U00002728 <b>Format:</b>\n"
+            "âœ¨ <b>Format:</b>\n"
             "<code>/delrule old_text</code>",
             parse_mode="HTML",
         )
@@ -1539,7 +1590,7 @@ async def del_rule(
 
     if old_text not in rules:
         await update.message.reply_text(
-            "\U0000274c <b>Rule Not Found</b>\n\n"
+            "âŒ <b>Rule Not Found</b>\n\n"
             "Exact old text use karo.",
             parse_mode="HTML",
         )
@@ -1559,13 +1610,13 @@ async def del_rule(
         )
 
         await update.message.reply_text(
-            "\U0001f5d1\U0000fe0f <b>RULE DELETED</b>\n\n"
+            "ðŸ—‘ï¸ <b>RULE DELETED</b>\n\n"
             f"<code>{html.escape(old_text)}</code>",
             parse_mode="HTML",
         )
     else:
         await update.message.reply_text(
-            "\U000026d4 <b>Access Denied</b>\n\n"
+            "â›” <b>Access Denied</b>\n\n"
             "Aap sirf apna rule delete kar sakte ho.",
             parse_mode="HTML",
         )
@@ -1583,7 +1634,7 @@ async def set_header(
 
     if not is_admin(user_id):
         await update.message.reply_text(
-            "\U000026d4 <b>Access Denied.</b>",
+            "â›” <b>Access Denied.</b>",
             parse_mode="HTML",
         )
         return
@@ -1604,7 +1655,7 @@ async def set_header(
     )
 
     await update.message.reply_text(
-        "\U0001f4dd <b>HEADER UPDATED</b>\n\n"
+        "ðŸ“ <b>HEADER UPDATED</b>\n\n"
         f"<code>{html.escape(header_text) or 'EMPTY'}</code>",
         parse_mode="HTML",
     )
@@ -1622,7 +1673,7 @@ async def set_footer(
 
     if not is_admin(user_id):
         await update.message.reply_text(
-            "\U000026d4 <b>Access Denied.</b>",
+            "â›” <b>Access Denied.</b>",
             parse_mode="HTML",
         )
         return
@@ -1643,7 +1694,7 @@ async def set_footer(
     )
 
     await update.message.reply_text(
-        "\U0001f4dd <b>FOOTER UPDATED</b>\n\n"
+        "ðŸ“ <b>FOOTER UPDATED</b>\n\n"
         f"<code>{html.escape(footer_text) or 'EMPTY'}</code>",
         parse_mode="HTML",
     )
@@ -1661,7 +1712,7 @@ async def clear_rules(
 
     if not is_admin(user_id):
         await update.message.reply_text(
-            "\U000026d4 <b>Access Denied.</b>",
+            "â›” <b>Access Denied.</b>",
             parse_mode="HTML",
         )
         return
@@ -1678,7 +1729,7 @@ async def clear_rules(
     )
 
     await update.message.reply_text(
-        "\U0001f9f9 <b>RULES CLEARED</b>\n\n"
+        "ðŸ§¹ <b>RULES CLEARED</b>\n\n"
         "Selected channel ke saare replacement rules clear ho gaye.",
         parse_mode="HTML",
     )
@@ -1725,30 +1776,32 @@ async def status(
     )
 
     message = (
-        "\U00002699\U0000fe0f <b>AUTO CAPTION ENGINE</b>\n"
-        "\U0001f4ca <b>CHANNEL DASHBOARD</b>\n\n"
-        "\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\n\n"
-        f"\U0001f4e2 <b>Channel:</b> "
+        "âš™ï¸ <b>AUTO CAPTION ENGINE</b>\n"
+        "ðŸ“Š <b>CHANNEL DASHBOARD</b>\n\n"
+        "â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”\n\n"
+        f"ðŸ“¢ <b>Channel:</b> "
         f"{html.escape(channel_title)}\n"
-        f"\U0001f194 <b>ID:</b> "
+        f"ðŸ†” <b>ID:</b> "
         f"<code>{channel_id}</code>\n"
     )
 
     if channel_username:
         message += (
-            f"\U0001f517 <b>Username:</b> "
+            f"ðŸ”— <b>Username:</b> "
             f"@{html.escape(channel_username)}\n"
         )
 
     message += (
         "\n"
-        f"\U0001f4e1 <b>Log:</b> "
-        f"{'\U0001f7e2 Connected' if LOG_CHANNEL_ID else '\U0001f534 Disabled'}\n"
-        f"\U0001f4e6 <b>Batch:</b> "
-        f"up to {BATCH_SIZE}\n"
-        f"\U0001f4cf <b>Stagger:</b> "
+        f"ðŸ“¡ <b>Log:</b> "
+        f"{'ðŸŸ¢ Connected' if LOG_CHANNEL_ID else 'ðŸ”´ Disabled'}\n"
+        f"ðŸ“¦ <b>Batch:</b> "
+        f"{BATCH_SIZE} + {BATCH_SIZE}\n"
+        f"ðŸ˜´ <b>Cooldown:</b> "
+        f"{COOLDOWN_SECONDS:.0f}s\n"
+        f"ðŸ“ <b>Stagger:</b> "
         f"{EDIT_STAGGER_SECONDS:.2f}s\n\n"
-        "\U0001f4ca <b>Replacement Rules:</b>\n"
+        "ðŸ“Š <b>Replacement Rules:</b>\n"
     )
 
     if not replacement_rules:
@@ -1758,14 +1811,14 @@ async def status(
             owner = rule_owner(rule)
 
             owner_tag = (
-                f" \U00002014 By <code>{owner}</code>"
+                f" â€” By <code>{owner}</code>"
                 if owner
                 else ""
             )
 
             message += (
-                f"\U0001f50d <code>{html.escape(str(old))}</code>"
-                " \U000027a1\U0000fe0f "
+                f"ðŸ” <code>{html.escape(str(old))}</code>"
+                " âž¡ï¸ "
                 f"<code>{html.escape(rule_value(rule))}</code>"
                 f"{owner_tag}\n"
             )
@@ -1788,7 +1841,7 @@ async def disconnect_channel(
 
     if not context.args:
         await update.message.reply_text(
-            "\U00002728 <b>Format:</b>\n"
+            "âœ¨ <b>Format:</b>\n"
             "<code>/disconnect CHANNEL_ID</code>",
             parse_mode="HTML",
         )
@@ -1800,7 +1853,7 @@ async def disconnect_channel(
         )
     except ValueError:
         await update.message.reply_text(
-            "\U0000274c Invalid Channel ID.",
+            "âŒ Invalid Channel ID.",
             parse_mode="HTML",
         )
         return
@@ -1811,7 +1864,7 @@ async def disconnect_channel(
             channel_id,
         ):
             await update.message.reply_text(
-                "\U000026d4 <b>Access Denied.</b>",
+                "â›” <b>Access Denied.</b>",
                 parse_mode="HTML",
             )
             return
@@ -1829,17 +1882,10 @@ async def disconnect_channel(
         )
 
     await update.message.reply_text(
-        "\U0001f534 <b>CHANNEL DISCONNECTED</b>\n\n"
-        f"\U0001f194 <code>{channel_id}</code>\n\n"
+        "ðŸ”´ <b>CHANNEL DISCONNECTED</b>\n\n"
+        f"ðŸ†” <code>{channel_id}</code>\n\n"
         "Ab is channel ke posts process nahi honge.",
         parse_mode="HTML",
-    )
-
-    await send_log_event(
-        context.bot,
-        "CHANNEL DISCONNECTED",
-        f"Channel ID: {channel_id}\nBy: {user_id}",
-        level="WARNING",
     )
 
 
@@ -1849,28 +1895,28 @@ async def disconnect_channel(
 
 def get_help_text():
     return (
-        "\U00002753 <b>AUTO CAPTION ENGINE \U00002014 HELP</b>\n\n"
-        "\U0001f916 Auto Caption Engine aapke Telegram channel "
+        "â“ <b>AUTO CAPTION ENGINE â€” HELP</b>\n\n"
+        "ðŸ¤– Auto Caption Engine aapke Telegram channel "
         "posts/captions ko automatically clean aur edit karta hai.\n\n"
-        "\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\n\n"
-        "\U00002795 <b>CONNECT</b>\n\n"
+        "â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”\n\n"
+        "âž• <b>CONNECT</b>\n\n"
         "Bot ko channel mein Administrator banao.\n"
         "<code>/connect CHANNEL_ID</code>\n\n"
-        "\U0001f4e2 <b>CHANNELS</b>\n\n"
+        "ðŸ“¢ <b>CHANNELS</b>\n\n"
         "<code>/channels</code>\n"
         "<code>/usechannel CHANNEL_ID</code>\n\n"
-        "\U0001f504 <b>REPLACEMENT RULE</b>\n\n"
+        "ðŸ”„ <b>REPLACEMENT RULE</b>\n\n"
         "<code>/addrule MovieHub -> DG_Contents</code>\n\n"
-        "\U0001f5d1\U0000fe0f <b>DELETE RULE</b>\n\n"
+        "ðŸ—‘ï¸ <b>DELETE RULE</b>\n\n"
         "<code>/delrule MovieHub</code>\n\n"
-        "\U0001f3a8 <b>HEADER / FOOTER</b>\n\n"
+        "ðŸŽ¨ <b>HEADER / FOOTER</b>\n\n"
         "<code>/setheader Your Header</code>\n"
         "<code>/setfooter Your Footer</code>\n\n"
-        "\U0001f4ca <b>STATUS</b>\n\n"
+        "ðŸ“Š <b>STATUS</b>\n\n"
         "<code>/status</code>\n\n"
-        "\U0001f9f9 <b>CLEAR RULES</b>\n\n"
+        "ðŸ§¹ <b>CLEAR RULES</b>\n\n"
         "<code>/clear</code>\n\n"
-        "\U0001f534 <b>DISCONNECT</b>\n\n"
+        "ðŸ”´ <b>DISCONNECT</b>\n\n"
         "<code>/disconnect CHANNEL_ID</code>"
     )
 
@@ -1884,7 +1930,7 @@ async def help_command(
     keyboard = [
         [
             InlineKeyboardButton(
-                "\U00002795 Add Me to Your Channel",
+                "âž• Add Me to Your Channel",
                 url=(
                     f"https://t.me/{BOT_USERNAME}"
                     "?startchannel=true"
@@ -1893,13 +1939,13 @@ async def help_command(
         ],
         [
             InlineKeyboardButton(
-                "\U0001f465 Support",
+                "ðŸ‘¥ Support",
                 url="https://t.me/dghelps_bot",
             )
         ],
         [
             InlineKeyboardButton(
-                "\U0001f519 Back",
+                "ðŸ”™ Back",
                 callback_data="back_start",
             )
         ],
@@ -1930,7 +1976,7 @@ def get_start_keyboard():
         [
             [
                 InlineKeyboardButton(
-                    "\U00002795 Add Me to Your Channel",
+                    "âž• Add Me to Your Channel",
                     url=(
                         f"https://t.me/{BOT_USERNAME}"
                         "?startchannel=true"
@@ -1939,17 +1985,17 @@ def get_start_keyboard():
             ],
             [
                 InlineKeyboardButton(
-                    "\U0001f4e2 Channel",
+                    "ðŸ“¢ Channel",
                     url="https://t.me/dg_contents",
                 ),
                 InlineKeyboardButton(
-                    "\U0001f465 Support",
+                    "ðŸ‘¥ Support",
                     url="https://t.me/dghelps_bot",
                 ),
             ],
             [
                 InlineKeyboardButton(
-                    "\U00002753 Help",
+                    "â“ Help",
                     callback_data="help",
                 )
             ],
@@ -1971,41 +2017,47 @@ async def start(
         or "User"
     )
 
+    # Only the first /start from a user is sent to the Telegram log channel.
+    await log_new_user(
+        context.bot,
+        update.effective_user,
+    )
+
     if is_admin(user_id):
         welcome_text = (
-            f"\U000026a1\U0000fe0f <b>Welcome, "
+            f"âš¡ï¸ <b>Welcome, "
             f"{html.escape(user_name)}!</b> (Admin)\n\n"
-            "\U0001f680 <b>Auto Caption Engine v11.0</b>\n"
-            "\U0001f4e1 <b>Controlled Batch + Anti-Loop System</b>\n\n"
-            "\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\n\n"
-            "\U0001f916 Automatically clean and edit captions "
+            "ðŸš€ <b>Auto Caption Engine v6.0</b>\n"
+            "ðŸ“¡ <b>Controlled Batch + Anti-Loop System</b>\n\n"
+            "â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”\n\n"
+            "ðŸ¤– Automatically clean and edit captions "
             "in your connected Telegram channels.\n\n"
-            "\U0001f512 Every channel has separate rules/settings.\n\n"
-            "\U000026a1\U0000fe0f <b>Quick Start</b>\n\n"
-            "1\U0000fe0f\U000020e3 Add me to your channel as Admin\n"
-            "2\U0000fe0f\U000020e3 Channel automatically registers\n"
-            "3\U0000fe0f\U000020e3 Use <code>/channels</code>\n"
-            "4\U0000fe0f\U000020e3 Use <code>/usechannel ID</code>\n"
-            "5\U0000fe0f\U000020e3 Add rules\n\n"
-            "\U0001f447 Use the buttons below."
+            "ðŸ”’ Every channel has separate rules/settings.\n\n"
+            "âš¡ï¸ <b>Quick Start</b>\n\n"
+            "1ï¸âƒ£ Add me to your channel as Admin\n"
+            "2ï¸âƒ£ Channel automatically registers\n"
+            "3ï¸âƒ£ Use <code>/channels</code>\n"
+            "4ï¸âƒ£ Use <code>/usechannel ID</code>\n"
+            "5ï¸âƒ£ Add rules\n\n"
+            "ðŸ‘‡ Use the buttons below."
         )
     else:
         welcome_text = (
-            f"\U0001f44b <b>Hello, "
+            f"ðŸ‘‹ <b>Hello, "
             f"{html.escape(user_name)}!</b>\n\n"
-            "\U0001f680 <b>Auto Caption Engine v11.0</b>\n"
-            "\U000026a1 Smart \U00002022 Fast \U00002022 Channel-Isolated\n\n"
-            "\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\U00002501\n\n"
-            "\U0001f916 Automatically manage your captions.\n\n"
-            "\U00002022 \U0001f504 Replace unwanted words\n"
-            "\U00002022 \U0001f9f9 Clean unwanted links/mentions\n"
-            "\U00002022 \U0001f3a8 Add custom header/footer\n"
-            "\U00002022 \U0001f512 Separate settings for every channel\n\n"
-            "\U0001f680 <b>Get Started</b>\n\n"
-            "1\U0000fe0f\U000020e3 Click <b>Add Me to Your Channel</b>\n"
-            "2\U0000fe0f\U000020e3 Select your channel\n"
-            "3\U0000fe0f\U000020e3 Give Administrator permission\n"
-            "4\U0000fe0f\U000020e3 Send <code>/connect CHANNEL_ID</code>\n\n"
+            "ðŸš€ <b>Auto Caption Engine v6.0</b>\n"
+            "âš¡ Smart â€¢ Fast â€¢ Channel-Isolated\n\n"
+            "â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”\n\n"
+            "ðŸ¤– Automatically manage your captions.\n\n"
+            "â€¢ ðŸ”„ Replace unwanted words\n"
+            "â€¢ ðŸ§¹ Clean unwanted links/mentions\n"
+            "â€¢ ðŸŽ¨ Add custom header/footer\n"
+            "â€¢ ðŸ”’ Separate settings for every channel\n\n"
+            "ðŸš€ <b>Get Started</b>\n\n"
+            "1ï¸âƒ£ Click <b>Add Me to Your Channel</b>\n"
+            "2ï¸âƒ£ Select your channel\n"
+            "3ï¸âƒ£ Give Administrator permission\n"
+            "4ï¸âƒ£ Send <code>/connect CHANNEL_ID</code>\n\n"
             "Then:\n"
             "<code>/addrule old -> new</code>"
         )
@@ -2044,20 +2096,20 @@ async def button_handler(
 
         if is_admin(query.from_user.id):
             welcome_text = (
-                f"\U000026a1\U0000fe0f <b>Welcome, "
+                f"âš¡ï¸ <b>Welcome, "
                 f"{html.escape(user_name)}!</b> (Admin)\n\n"
-                "\U0001f680 <b>Auto Caption Engine v11.0</b>\n\n"
-                "\U0001f916 Controlled caption processing.\n"
-                "\U0001f512 Channel-isolated settings.\n\n"
-                "\U0001f447 Choose an option below."
+                "ðŸš€ <b>Auto Caption Engine v6.0</b>\n\n"
+                "ðŸ¤– Controlled caption processing.\n"
+                "ðŸ”’ Channel-isolated settings.\n\n"
+                "ðŸ‘‡ Choose an option below."
             )
         else:
             welcome_text = (
-                f"\U0001f44b <b>Hello, "
+                f"ðŸ‘‹ <b>Hello, "
                 f"{html.escape(user_name)}!</b>\n\n"
-                "\U0001f680 <b>Auto Caption Engine v11.0</b>\n\n"
-                "\U0001f916 Smart automatic caption editor.\n\n"
-                "\U0001f447 Choose an option below."
+                "ðŸš€ <b>Auto Caption Engine v6.0</b>\n\n"
+                "ðŸ¤– Smart automatic caption editor.\n\n"
+                "ðŸ‘‡ Choose an option below."
             )
 
         await query.edit_message_text(
@@ -2079,7 +2131,7 @@ async def error_handler(
 
     if isinstance(error, RetryAfter):
         logger.warning(
-            "\U000023f3 Global RetryAfter: %.1fs",
+            "â³ Global RetryAfter: %.1fs",
             float(error.retry_after),
         )
         return
@@ -2088,6 +2140,19 @@ async def error_handler(
         "Unhandled Telegram error: %s",
         error,
     )
+
+    # Telegram/runtime errors are important; routine successful edits are not.
+    try:
+        bot = getattr(context, "bot", None)
+        if bot:
+            await send_important_log(
+                bot,
+                "BOT ERROR",
+                f"{type(error).__name__}: {error}",
+                "ERROR",
+            )
+    except Exception as exc:
+        logger.warning("âš ï¸ Could not report global error to log channel: %s", exc)
 
 
 # ============================================================
@@ -2173,21 +2238,23 @@ def main():
 
     app.add_error_handler(error_handler)
 
-    logger.info("\U0001f916 Auto Caption Engine v11.0 starting...")
+    logger.info("ðŸ¤– Auto Caption Engine v6.0 starting...")
     logger.info(
-        "\U0001f4e6 Edit schedule: continuous batches up to %d",
+        "ðŸ“¦ Edit schedule: %d + %d, then %.0fs cooldown",
         BATCH_SIZE,
+        BATCH_SIZE,
+        COOLDOWN_SECONDS,
     )
     logger.info(
-        "\U000023f1\U0000fe0f Batch stagger: %.2fs",
+        "â±ï¸ Batch stagger: %.2fs",
         EDIT_STAGGER_SECONDS,
     )
     logger.info(
-        "\U0001f451 Admin IDs: %s",
+        "ðŸ‘‘ Admin IDs: %s",
         ADMIN_IDS,
     )
     logger.info(
-        "\U0001f916 Bot username: @%s",
+        "ðŸ¤– Bot username: @%s",
         BOT_USERNAME,
     )
 
