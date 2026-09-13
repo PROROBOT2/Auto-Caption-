@@ -164,7 +164,7 @@ BOT_USERNAME = "DG_Primebot"
 # an unnecessarily aggressive number of simultaneous Telegram edits.
 # Exactly 10 caption edits can run at the same time.
 # Incoming updates are allowed to queue independently.
-CAPTION_WORKERS = 10
+CAPTION_BATCH_SIZE = 10
 
 # Retry temporary Telegram/network failures.
 MAX_EDIT_RETRIES = 5
@@ -172,7 +172,8 @@ MAX_EDIT_RETRIES = 5
 # Cache each channel's settings briefly.
 CONFIG_CACHE_TTL = 30
 
-_caption_semaphore = asyncio.Semaphore(CAPTION_WORKERS)
+_caption_queue = asyncio.Queue(maxsize=2000)
+_caption_worker_task = None
 _config_cache = {}
 _config_locks = {}
 
@@ -214,23 +215,16 @@ def invalidate_channel_config_cache(channel_id):
 
 
 async def edit_with_retry(edit_func, *args, **kwargs):
+    """Retry temporary network errors; let RetryAfter reach the batch worker."""
+
     last_error = None
 
     for attempt in range(1, MAX_EDIT_RETRIES + 1):
         try:
             return await edit_func(*args, **kwargs)
 
-        except RetryAfter as exc:
-            last_error = exc
-            wait_time = float(exc.retry_after) + 0.2
-
-            logger.warning(
-                f"\u23f3 Telegram rate limit for edit; "
-                f"retrying in {wait_time:.1f}s "
-                f"(attempt {attempt}/{MAX_EDIT_RETRIES})"
-            )
-
-            await asyncio.sleep(wait_time)
+        except RetryAfter:
+            raise
 
         except (TimedOut, NetworkError) as exc:
             last_error = exc
@@ -240,7 +234,7 @@ async def edit_with_retry(edit_func, *args, **kwargs):
             )
 
             logger.warning(
-                f"\U0001f310 Temporary Telegram/network error; "
+                f"\\U0001f310 Temporary Telegram/network error; "
                 f"retrying in {wait_time:.1f}s "
                 f"(attempt {attempt}/{MAX_EDIT_RETRIES}): {exc}"
             )
@@ -248,20 +242,174 @@ async def edit_with_retry(edit_func, *args, **kwargs):
             await asyncio.sleep(wait_time)
 
         except BadRequest as exc:
-            # Telegram returns this when the requested content is
-            # already identical. It is a successful no-op, not a failure.
             if "message is not modified" in str(exc).lower():
-                logger.info(
-                    "\u2139\ufe0f Message already had the requested caption/text."
-                )
                 return None
-
             raise
 
     if last_error:
         raise last_error
 
     return None
+
+
+async def _run_edit_job(job):
+    bot = job["bot"]
+    channel_id = job["channel_id"]
+    message_id = job["message_id"]
+    caption = job["caption"]
+    is_caption = job["is_caption"]
+
+    started = time.monotonic()
+
+    try:
+        if is_caption:
+            await edit_with_retry(
+                bot.edit_message_caption,
+                chat_id=channel_id,
+                message_id=message_id,
+                caption=caption,
+                parse_mode="HTML"
+            )
+        else:
+            await edit_with_retry(
+                bot.edit_message_text,
+                chat_id=channel_id,
+                message_id=message_id,
+                text=caption,
+                parse_mode="HTML"
+            )
+
+        elapsed = time.monotonic() - started
+
+        logger.info(
+            f"\\u2705 CAPTION EDITED | "
+            f"channel={channel_id} "
+            f"message={message_id} "
+            f"time={elapsed:.3f}s"
+        )
+
+        return ("ok", job, None)
+
+    except RetryAfter as exc:
+        retry_after = max(1.0, float(exc.retry_after))
+
+        logger.warning(
+            f"\\u23f3 Telegram 429 | "
+            f"channel={channel_id} "
+            f"message={message_id} "
+            f"retry_after={retry_after:.1f}s"
+        )
+
+        return ("rate_limit", job, retry_after)
+
+    except BadRequest as exc:
+        if "message is not modified" in str(exc).lower():
+            return ("ok", job, None)
+
+        logger.error(
+            f"\\u274c Telegram BadRequest | "
+            f"channel={channel_id} "
+            f"message={message_id} | {exc}"
+        )
+
+        return ("failed", job, None)
+
+    except Exception as exc:
+        logger.exception(
+            f"\\u274c FAILED | "
+            f"channel={channel_id} "
+            f"message={message_id} | {exc}"
+        )
+
+        return ("failed", job, None)
+
+
+async def _caption_batch_worker():
+    """Run queued caption edits in batches of up to 10."""
+
+    while True:
+        first_job = await _caption_queue.get()
+        batch = [first_job]
+
+        for _ in range(CAPTION_BATCH_SIZE - 1):
+            try:
+                batch.append(_caption_queue.get_nowait())
+            except asyncio.QueueEmpty:
+                break
+
+        logger.info(
+            f"\\U0001f680 EDIT BATCH START | "
+            f"size={len(batch)} "
+            f"queue_remaining={_caption_queue.qsize()}"
+        )
+
+        results = await asyncio.gather(
+            *[_run_edit_job(job) for job in batch],
+            return_exceptions=False
+        )
+
+        rate_limits = [
+            result[2]
+            for result in results
+            if result[0] == "rate_limit"
+        ]
+
+        retry_jobs = [
+            result[1]
+            for result in results
+            if result[0] == "rate_limit"
+        ]
+
+        if rate_limits and retry_jobs:
+            wait_time = max(rate_limits) + 0.25
+
+            logger.warning(
+                f"\\u23f3 BATCH RATE-LIMITED | "
+                f"failed={len(retry_jobs)}/{len(batch)} | "
+                f"waiting={wait_time:.1f}s"
+            )
+
+            await asyncio.sleep(wait_time)
+
+            for job in retry_jobs:
+                await _caption_queue.put(job)
+
+        for _ in batch:
+            _caption_queue.task_done()
+
+        logger.info(
+            f"\\u2705 EDIT BATCH COMPLETE | "
+            f"size={len(batch)} "
+            f"queue_remaining={_caption_queue.qsize()}"
+        )
+
+
+async def _start_caption_worker(application):
+    global _caption_worker_task
+
+    if _caption_worker_task is None:
+        _caption_worker_task = asyncio.create_task(
+            _caption_batch_worker()
+        )
+
+    logger.info(
+        f"\\U0001f680 Caption batch worker started "
+        f"(batch_size={CAPTION_BATCH_SIZE})"
+    )
+
+
+async def _stop_caption_worker(application):
+    global _caption_worker_task
+
+    if _caption_worker_task is not None:
+        _caption_worker_task.cancel()
+
+        try:
+            await _caption_worker_task
+        except asyncio.CancelledError:
+            pass
+
+        _caption_worker_task = None
 
 
 # ============================================================
@@ -1111,6 +1259,8 @@ async def edit_channel_caption(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE
 ):
+    """Prepare a channel caption and put the edit into the batch queue."""
+
     msg = update.channel_post or update.edited_channel_post
 
     if not msg:
@@ -1119,163 +1269,137 @@ async def edit_channel_caption(
     channel_id = msg.chat_id
     message_id = msg.message_id
 
-    async with _caption_semaphore:
-        started = time.monotonic()
+    logger.info(
+        f"\\U0001f4e9 RECEIVED | {channel_id}/{message_id}"
+    )
 
-        logger.info(
-            f"\U0001f4e9 Processing | {channel_id}/{message_id}"
+    try:
+        config = await get_cached_channel_config_async(channel_id)
+
+        if not config or not config.get("active", True):
+            logger.info(
+                f"\\u23ed\\ufe0f Inactive/unconnected channel: {channel_id}"
+            )
+            return
+
+        text_to_check = msg.text or msg.caption
+
+        if not text_to_check:
+            logger.info(
+                f"\\u23ed\\ufe0f No text/caption: "
+                f"{channel_id}/{message_id}"
+            )
+            return
+
+        replacement_rules = config.get(
+            "replacement_rules",
+            {}
         )
 
-        try:
-            # Fast cached config. The synchronous MongoDB operation is
-            # moved to a worker thread on a cache miss.
-            config = await get_cached_channel_config_async(
-                channel_id
-            )
+        custom_header = config.get(
+            "custom_header",
+            ""
+        )
 
-            if not config or not config.get("active", True):
-                logger.info(
-                    f"\u23ed\ufe0f Inactive/unconnected channel: {channel_id}"
-                )
-                return
+        custom_footer = config.get(
+            "custom_footer",
+            ""
+        )
 
-            text_to_check = msg.text or msg.caption
+        final_text = text_to_check
 
-            # Media without a caption has nothing to edit.
-            if not text_to_check:
-                logger.info(
-                    f"\u23ed\ufe0f No text/caption: {channel_id}/{message_id}"
-                )
-                return
+        final_text = re.sub(
+            r"(https?://)?t\\.me/"
+            r"(?!DG_Contents|dghelps_bot)"
+            r"[a-zA-Z0-9_]+",
+            "",
+            final_text,
+            flags=re.IGNORECASE
+        )
 
-            replacement_rules = config.get(
-                "replacement_rules",
-                {}
-            )
+        final_text = re.sub(
+            r"@(?!DG_Contents|dghelps_bot)"
+            r"[a-zA-Z0-9_]+",
+            "",
+            final_text,
+            flags=re.IGNORECASE
+        )
 
-            custom_header = config.get(
-                "custom_header",
-                ""
-            )
+        for old_txt, rule in replacement_rules.items():
+            new_txt = rule_value(rule)
 
-            custom_footer = config.get(
-                "custom_footer",
-                ""
-            )
+            if not old_txt:
+                continue
 
-            final_text = text_to_check
-
-            # Clean links and mentions.
             final_text = re.sub(
-                r"(https?://)?t\.me/"
-                r"(?!DG_Contents|dghelps_bot)"
-                r"[a-zA-Z0-9_]+",
-                "",
+                re.escape(old_txt),
+                new_txt,
                 final_text,
                 flags=re.IGNORECASE
             )
 
-            final_text = re.sub(
-                r"@(?!DG_Contents|dghelps_bot)"
-                r"[a-zA-Z0-9_]+",
-                "",
-                final_text,
-                flags=re.IGNORECASE
-            )
+        final_text = re.sub(
+            r" +",
+            " ",
+            final_text
+        ).strip()
 
-            # Apply every configured rule immediately.
-            for old_txt, rule in replacement_rules.items():
+        safe_header = html.escape(custom_header)
+        safe_footer = html.escape(custom_footer)
+        safe_text = html.escape(final_text)
 
-                new_txt = rule_value(rule)
+        header_part = (
+            f"<b>{safe_header}</b>\\n\\n"
+            if custom_header else ""
+        )
 
-                if not old_txt:
-                    continue
+        footer_part = (
+            f"\\n\\n<b>{safe_footer}</b>"
+            if custom_footer else ""
+        )
 
-                final_text = re.sub(
-                    re.escape(old_txt),
-                    new_txt,
-                    final_text,
-                    flags=re.IGNORECASE
-                )
+        final_content = (
+            f"{header_part}"
+            f"<b>{safe_text}</b>"
+            f"{footer_part}"
+        )
 
-            final_text = re.sub(
-                r" +",
-                " ",
-                final_text
-            ).strip()
+        is_caption = bool(msg.caption)
 
-            safe_header = html.escape(custom_header)
-            safe_footer = html.escape(custom_footer)
-            safe_text = html.escape(final_text)
+        current_content = (
+            msg.caption_html
+            if is_caption
+            else msg.text_html
+        ) or ""
 
-            header_part = (
-                f"<b>{safe_header}</b>\n\n"
-                if custom_header else ""
-            )
-
-            footer_part = (
-                f"\n\n<b>{safe_footer}</b>"
-                if custom_footer else ""
-            )
-
-            final_content = (
-                f"{header_part}"
-                f"<b>{safe_text}</b>"
-                f"{footer_part}"
-            )
-
-            # The actual Telegram edit is the important operation.
-            # Only one of these branches can run for a message.
-            if msg.caption:
-                try:
-                    current = msg.caption_html or ""
-
-                    if current != final_content:
-                        await edit_with_retry(
-                            context.bot.edit_message_caption,
-                            chat_id=channel_id,
-                            message_id=message_id,
-                            caption=final_content,
-                            parse_mode="HTML"
-                        )
-
-                except BadRequest as exc:
-                    if "message is not modified" not in str(exc).lower():
-                        raise
-
-            elif msg.text:
-                try:
-                    current = msg.text_html or ""
-
-                    if current != final_content:
-                        await edit_with_retry(
-                            context.bot.edit_message_text,
-                            chat_id=channel_id,
-                            message_id=message_id,
-                            text=final_content,
-                            parse_mode="HTML"
-                        )
-
-                except BadRequest as exc:
-                    if "message is not modified" not in str(exc).lower():
-                        raise
-
-            elapsed = time.monotonic() - started
-
+        if current_content == final_content:
             logger.info(
-                f"\u2705 CAPTION EDITED | "
-                f"channel={channel_id} "
-                f"message={message_id} "
-                f"time={elapsed:.3f}s"
+                f"\\u23ed\\ufe0f Already correct | "
+                f"{channel_id}/{message_id}"
             )
+            return
 
-            # Do not send an extra Telegram API request for logging.
-            # File/application logs already contain the processing result.
+        job = {
+            "bot": context.bot,
+            "channel_id": channel_id,
+            "message_id": message_id,
+            "caption": final_content,
+            "is_caption": is_caption,
+        }
 
-        except Exception as exc:
-            logger.exception(
-                f"\u274c FAILED | {channel_id}/{message_id} | {exc}"
-            )
+        await _caption_queue.put(job)
+
+        logger.info(
+            f"\\U0001f4e5 QUEUED | "
+            f"{channel_id}/{message_id} | "
+            f"queue={_caption_queue.qsize()}"
+        )
+
+    except Exception as exc:
+        logger.exception(
+            f"\\u274c QUEUE FAILED | "
+            f"{channel_id}/{message_id} | {exc}"
+        )
 
 
 # ============================================================
@@ -2394,6 +2518,8 @@ def main():
         # Give Telegram edit requests a healthy HTTP connection pool.
         .connection_pool_size(30)
         .pool_timeout(30.0)
+        .post_init(_start_caption_worker)
+        .post_shutdown(_stop_caption_worker)
         .build()
     )
 
