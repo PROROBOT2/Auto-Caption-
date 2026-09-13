@@ -8,7 +8,7 @@ import re
 import logging
 import html
 import time
-from telegram.error import RetryAfter, TimedOut, NetworkError
+from telegram.error import RetryAfter, TimedOut, NetworkError, BadRequest
 
 from telegram import (
     Update,
@@ -160,36 +160,51 @@ BOT_USERNAME = "DG_Primebot"
 # PERFORMANCE / RELIABILITY
 # ============================================================
 
-# Number of caption edits allowed to run concurrently.
-# 8-10 is a safe starting point for burst traffic.
-CAPTION_WORKERS = int(os.environ.get("CAPTION_WORKERS", "10"))
+# Keep this at 10: fast enough for small bursts while avoiding
+# an unnecessarily aggressive number of simultaneous Telegram edits.
+CAPTION_WORKERS = 10
 
 # Retry temporary Telegram/network failures.
-MAX_EDIT_RETRIES = int(os.environ.get("MAX_EDIT_RETRIES", "4"))
+MAX_EDIT_RETRIES = 4
 
-# Keep channel settings in RAM briefly so a burst of posts
-# does not hit MongoDB for every single message.
-CONFIG_CACHE_TTL = int(os.environ.get("CONFIG_CACHE_TTL", "30"))
+# Cache each channel's settings briefly.
+CONFIG_CACHE_TTL = 30
 
 _caption_semaphore = asyncio.Semaphore(CAPTION_WORKERS)
 _config_cache = {}
+_config_locks = {}
 
 
-def get_cached_channel_config(channel_id):
+async def get_cached_channel_config_async(channel_id):
+    """Fast channel config lookup without blocking the async event loop."""
     now = time.monotonic()
     cached = _config_cache.get(channel_id)
 
     if cached and (now - cached["time"]) < CONFIG_CACHE_TTL:
         return cached["config"]
 
-    config = get_channel_config(channel_id)
+    # Prevent 10 simultaneous posts from all hitting MongoDB at once.
+    lock = _config_locks.setdefault(channel_id, asyncio.Lock())
 
-    _config_cache[channel_id] = {
-        "time": now,
-        "config": config,
-    }
+    async with lock:
+        now = time.monotonic()
+        cached = _config_cache.get(channel_id)
 
-    return config
+        if cached and (now - cached["time"]) < CONFIG_CACHE_TTL:
+            return cached["config"]
+
+        # MongoClient is synchronous, so move it off the event loop.
+        config = await asyncio.to_thread(
+            get_channel_config,
+            channel_id
+        )
+
+        _config_cache[channel_id] = {
+            "time": time.monotonic(),
+            "config": config,
+        }
+
+        return config
 
 
 def invalidate_channel_config_cache(channel_id):
@@ -206,24 +221,45 @@ async def edit_with_retry(edit_func, *args, **kwargs):
         except RetryAfter as exc:
             last_error = exc
             wait_time = float(exc.retry_after) + 0.2
+
             logger.warning(
-                f"\u23f3 Telegram rate limit; retrying in {wait_time:.1f}s "
+                f"\u23f3 Telegram rate limit for edit; "
+                f"retrying in {wait_time:.1f}s "
                 f"(attempt {attempt}/{MAX_EDIT_RETRIES})"
             )
+
             await asyncio.sleep(wait_time)
 
         except (TimedOut, NetworkError) as exc:
             last_error = exc
-            wait_time = min(0.5 * (2 ** (attempt - 1)), 4.0)
-            logger.warning(
-                f"\U0001f310 Temporary Telegram/network error; retrying in "
-                f"{wait_time:.1f}s (attempt {attempt}/{MAX_EDIT_RETRIES}): {exc}"
+            wait_time = min(
+                0.5 * (2 ** (attempt - 1)),
+                4.0
             )
+
+            logger.warning(
+                f"\U0001f310 Temporary Telegram/network error; "
+                f"retrying in {wait_time:.1f}s "
+                f"(attempt {attempt}/{MAX_EDIT_RETRIES}): {exc}"
+            )
+
             await asyncio.sleep(wait_time)
 
-    raise last_error
+        except BadRequest as exc:
+            # Telegram returns this when the requested content is
+            # already identical. It is a successful no-op, not a failure.
+            if "message is not modified" in str(exc).lower():
+                logger.info(
+                    "\u2139\ufe0f Message already had the requested caption/text."
+                )
+                return None
 
+            raise
 
+    if last_error:
+        raise last_error
+
+    return None
 
 
 # ============================================================
@@ -247,9 +283,6 @@ def rule_owner(rule):
 
 
 def rule_approved(rule):
-
-    if isinstance(rule, dict):
-        return rule.get("approved", True)
 
     return True
 
@@ -278,13 +311,11 @@ def default_channel_config(channel_id):
             "MovieHub": {
                 "new": "DG_Contents",
                 "added_by": None,
-                "approved": True,
             },
 
             "JoinUs": {
                 "new": "SubscribeNow",
                 "added_by": None,
-                "approved": True,
             },
         },
 
@@ -582,7 +613,7 @@ async def handle_bot_channel_status(
                     {
                         "$set": {
 
-                            "active": True,
+                            "active": False,
 
                             "title": title,
 
@@ -602,6 +633,8 @@ async def handle_bot_channel_status(
                 config["owner_user_id"] = (
                     actor_user_id
                 )
+
+                config["active"] = False
 
                 config["title"] = title
 
@@ -628,32 +661,16 @@ async def handle_bot_channel_status(
                 chat_id=actor_user_id,
 
                 text=(
-
-                    "\U0001f389 <b>CHANNEL CONNECTED!</b>\n\n"
-
+                    "\U0001f389 <b>Thanks! Your channel has been received.</b>\n\n"
                     f"\U0001f4e2 <b>Channel:</b> "
-                    f"<code>{html.escape(title or str(channel_id))}</code>\n\n"
-
+                    f"{html.escape(title or str(channel_id))}\n"
                     f"\U0001f194 <b>Channel ID:</b> "
                     f"<code>{channel_id}</code>\n\n"
-
-                    "\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n\n"
-
-                    "\u2705 <b>Connection Status:</b> ACTIVE\n\n"
-
-                    "\U0001f3af <b>Quick Commands:</b>\n\n"
-
-                    "\u2022 <code>/channels</code> \u2014 My Channels\n"
-                    "\u2022 <code>/usechannel ID</code> \u2014 Select Channel\n"
-                    "\u2022 <code>/addrule old -> new</code> \u2014 Add Rule\n"
-                    "\u2022 <code>/status</code> \u2014 Channel Status\n\n"
-
-                    "\U0001f512 <b>Important:</b>\n"
-                    "Is channel ki rules/settings "
-                    "<b>sirf isi channel</b> par apply hongi.\n\n"
-
-                    "\U0001f4a1 Multiple channels ke liye bot ko "
-                    "har channel mein admin bana sakte ho."
+                    "\U0001f517 <b>Connect it:</b>\n"
+                    f"<code>/connect {channel_id}</code>\n\n"
+                    "\u2705 After connecting, use "
+                    "<code>/addrule old -> new</code> "
+                    "to create your caption rules."
                 ),
 
                 parse_mode="HTML"
@@ -708,6 +725,103 @@ async def handle_bot_channel_status(
             logger.error(
                 f"\u274c Channel disconnect error: {e}"
             )
+
+
+
+# ============================================================
+# /CONNECT
+# ============================================================
+
+async def connect_channel(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
+
+    user_id = update.effective_user.id
+
+    if not context.args:
+        await update.message.reply_text(
+            "\u2139\ufe0f <b>Connect Channel</b>\n\n"
+            "Use:\n"
+            "<code>/connect CHANNEL_ID</code>",
+            parse_mode="HTML"
+        )
+        return
+
+    try:
+        channel_id = int(context.args[0].strip())
+    except ValueError:
+        await update.message.reply_text(
+            "\u274c Invalid Channel ID.",
+            parse_mode="HTML"
+        )
+        return
+
+    try:
+        channel = channels_col.find_one({"_id": str(channel_id)})
+
+        if not channel:
+            await update.message.reply_text(
+                "\u274c <b>Channel not found.</b>\n\n"
+                "Pehle bot ko channel mein Administrator banao.",
+                parse_mode="HTML"
+            )
+            return
+
+        if channel.get("owner_user_id") != user_id:
+            await update.message.reply_text(
+                "\u274c <b>Access Denied.</b>\n\n"
+                "Ye channel aapke account se linked nahi hai.",
+                parse_mode="HTML"
+            )
+            return
+
+        me = await context.bot.get_me()
+        bot_member = await context.bot.get_chat_member(
+            chat_id=channel_id,
+            user_id=me.id
+        )
+
+        if bot_member.status != ChatMemberStatus.ADMINISTRATOR:
+            await update.message.reply_text(
+                "\u274c Bot ko channel mein Administrator permission chahiye.",
+                parse_mode="HTML"
+            )
+            return
+
+        channels_col.update_one(
+            {"_id": str(channel_id)},
+            {"$set": {"active": True}}
+        )
+
+        invalidate_channel_config_cache(channel_id)
+        set_selected_channel(user_id, channel_id)
+
+        title = channel.get("title", "Channel")
+
+        await update.message.reply_text(
+            "\u2705 <b>CHANNEL CONNECTED</b>\n\n"
+            f"\U0001f4e2 <b>{html.escape(title)}</b>\n"
+            f"\U0001f194 <code>{channel_id}</code>\n\n"
+            "\U0001f680 Ab is channel ke captions automatically process honge.\n\n"
+            "Add a rule:\n"
+            "<code>/addrule old -> new</code>",
+            parse_mode="HTML"
+        )
+
+        logger.info(
+            f"\u2705 Channel activated by /connect: "
+            f"{channel_id} owner={user_id}"
+        )
+
+    except Exception as e:
+        logger.exception(f"\u274c Connect command failed: {e}")
+
+        await update.message.reply_text(
+            "\u274c <b>Connection failed.</b>\n"
+            "Channel ID aur bot permissions check karo.",
+            parse_mode="HTML"
+        )
 
 
 # ============================================================
@@ -1003,52 +1117,53 @@ async def edit_channel_caption(
     channel_id = msg.chat_id
     message_id = msg.message_id
 
-    # Limit only the actual edit work. Updates can still arrive
-    # and wait in an asyncio queue instead of being silently lost.
     async with _caption_semaphore:
+        started = time.monotonic()
 
         logger.info(
-            f"\U0001f4e9 Processing channel post | "
-            f"Channel: {channel_id} | Message: {message_id}"
+            f"\U0001f4e9 Processing | {channel_id}/{message_id}"
         )
-
-        # Cached config = much faster during bursts.
-        config = get_cached_channel_config(channel_id)
-
-        if not config or not config.get("active", True):
-            logger.info(
-                f"\u23ed\ufe0f Channel {channel_id} not connected/active."
-            )
-            return
-
-        replacement_rules = config.get(
-            "replacement_rules",
-            {}
-        )
-
-        custom_header = config.get(
-            "custom_header",
-            ""
-        )
-
-        custom_footer = config.get(
-            "custom_footer",
-            ""
-        )
-
-        text_to_check = msg.text or msg.caption
-
-        # Media without caption has nothing to edit.
-        if not text_to_check:
-            logger.info(
-                f"\u23ed\ufe0f Message {message_id} has no text/caption."
-            )
-            return
-
-        final_text = text_to_check
 
         try:
-            # Remove unwanted Telegram links.
+            # Fast cached config. The synchronous MongoDB operation is
+            # moved to a worker thread on a cache miss.
+            config = await get_cached_channel_config_async(
+                channel_id
+            )
+
+            if not config or not config.get("active", True):
+                logger.info(
+                    f"\u23ed\ufe0f Inactive/unconnected channel: {channel_id}"
+                )
+                return
+
+            text_to_check = msg.text or msg.caption
+
+            # Media without a caption has nothing to edit.
+            if not text_to_check:
+                logger.info(
+                    f"\u23ed\ufe0f No text/caption: {channel_id}/{message_id}"
+                )
+                return
+
+            replacement_rules = config.get(
+                "replacement_rules",
+                {}
+            )
+
+            custom_header = config.get(
+                "custom_header",
+                ""
+            )
+
+            custom_footer = config.get(
+                "custom_footer",
+                ""
+            )
+
+            final_text = text_to_check
+
+            # Clean links and mentions.
             final_text = re.sub(
                 r"(https?://)?t\.me/"
                 r"(?!DG_Contents|dghelps_bot)"
@@ -1058,7 +1173,6 @@ async def edit_channel_caption(
                 flags=re.IGNORECASE
             )
 
-            # Remove unwanted @mentions.
             final_text = re.sub(
                 r"@(?!DG_Contents|dghelps_bot)"
                 r"[a-zA-Z0-9_]+",
@@ -1067,22 +1181,19 @@ async def edit_channel_caption(
                 flags=re.IGNORECASE
             )
 
-            # Apply this channel's own rules.
+            # Apply every configured rule immediately.
             for old_txt, rule in replacement_rules.items():
-                if not rule_approved(rule):
-                    continue
 
                 new_txt = rule_value(rule)
 
                 if not old_txt:
                     continue
 
-                final_text = re.compile(
+                final_text = re.sub(
                     re.escape(old_txt),
-                    re.IGNORECASE
-                ).sub(
                     new_txt,
-                    final_text
+                    final_text,
+                    flags=re.IGNORECASE
                 )
 
             final_text = re.sub(
@@ -1091,69 +1202,71 @@ async def edit_channel_caption(
                 final_text
             ).strip()
 
-        except Exception as exc:
-            logger.exception(
-                f"\u274c Text processing failed for message {message_id}: {exc}"
+            safe_header = html.escape(custom_header)
+            safe_footer = html.escape(custom_footer)
+            safe_text = html.escape(final_text)
+
+            header_part = (
+                f"<b>{safe_header}</b>\n\n"
+                if custom_header else ""
             )
-            return
 
-        safe_header = html.escape(custom_header)
-        safe_footer = html.escape(custom_footer)
-        safe_text = html.escape(final_text)
+            footer_part = (
+                f"\n\n<b>{safe_footer}</b>"
+                if custom_footer else ""
+            )
 
-        header_part = (
-            f"<b>{safe_header}</b>\n\n"
-            if custom_header else ""
-        )
+            final_content = (
+                f"{header_part}"
+                f"<b>{safe_text}</b>"
+                f"{footer_part}"
+            )
 
-        footer_part = (
-            f"\n\n<b>{safe_footer}</b>"
-            if custom_footer else ""
-        )
-
-        final_caption = (
-            f"{header_part}"
-            f"<b>{safe_text}</b>"
-            f"{footer_part}"
-        )
-
-        try:
-            # Avoid an unnecessary Telegram API call if no actual change
-            # is needed.
+            # The actual Telegram edit is the important operation.
+            # Only one of these branches can run for a message.
             if msg.caption:
-                current_caption = msg.caption_html or ""
+                try:
+                    current = msg.caption_html or ""
 
-                if current_caption != final_caption:
-                    await edit_with_retry(
-                        context.bot.edit_message_caption,
-                        chat_id=channel_id,
-                        message_id=message_id,
-                        caption=final_caption,
-                        parse_mode="HTML"
-                    )
+                    if current != final_content:
+                        await edit_with_retry(
+                            context.bot.edit_message_caption,
+                            chat_id=channel_id,
+                            message_id=message_id,
+                            caption=final_content,
+                            parse_mode="HTML"
+                        )
 
-                    logger.info(
-                        f"\u2705 Caption edited: {channel_id}/{message_id}"
-                    )
+                except BadRequest as exc:
+                    if "message is not modified" not in str(exc).lower():
+                        raise
 
             elif msg.text:
-                current_text = msg.text_html or ""
+                try:
+                    current = msg.text_html or ""
 
-                if current_text != final_caption:
-                    await edit_with_retry(
-                        context.bot.edit_message_text,
-                        chat_id=channel_id,
-                        message_id=message_id,
-                        text=final_caption,
-                        parse_mode="HTML"
-                    )
+                    if current != final_content:
+                        await edit_with_retry(
+                            context.bot.edit_message_text,
+                            chat_id=channel_id,
+                            message_id=message_id,
+                            text=final_content,
+                            parse_mode="HTML"
+                        )
 
-                    logger.info(
-                        f"\u2705 Text edited: {channel_id}/{message_id}"
-                    )
+                except BadRequest as exc:
+                    if "message is not modified" not in str(exc).lower():
+                        raise
 
-            # Optional logging creates a second API call, so keep it
-            # separate from the main edit path.
+            elapsed = time.monotonic() - started
+
+            logger.info(
+                f"\u2705 Done | {channel_id}/{message_id} | "
+                f"{elapsed:.2f}s"
+            )
+
+            # Logging is deliberately after the edit so it cannot delay
+            # the main caption-edit operation.
             if LOG_CHANNEL_ID:
                 try:
                     await edit_with_retry(
@@ -1164,14 +1277,13 @@ async def edit_channel_caption(
                     )
                 except Exception as log_error:
                     logger.warning(
-                        f"\u26a0\ufe0f Log copy failed for {channel_id}/{message_id}: "
-                        f"{log_error}"
+                        f"\u26a0\ufe0f Log copy failed for "
+                        f"{channel_id}/{message_id}: {log_error}"
                     )
 
         except Exception as exc:
-            # IMPORTANT: never silently swallow a failed message.
             logger.exception(
-                f"\u274c FAILED message {channel_id}/{message_id}: {exc}"
+                f"\u274c FAILED | {channel_id}/{message_id} | {exc}"
             )
 
 
@@ -1265,79 +1377,33 @@ async def add_rule(
         )
 
 
-        # Admin = instantly live
-        approved = is_admin(
-            user_id
-        )
-
-
         rules[old_part] = {
-
             "new": new_part,
-
             "added_by": user_id,
-
-            "approved": approved,
         }
 
-
         update_channel_config(
-
             channel_id,
-
             "replacement_rules",
-
             rules
         )
-
 
         channel_title = config.get(
             "title",
             str(channel_id)
         )
 
+        await update.message.reply_text(
+            "\u2705 <b>RULE ADDED & LIVE!</b>\n\n"
+            f"\U0001f4e2 <b>Channel:</b> "
+            f"{html.escape(channel_title)}\n\n"
+            f"\U0001f50d <code>{html.escape(old_part)}</code>"
+            " \u27a1\ufe0f "
+            f"<code>{html.escape(new_part)}</code>\n\n"
+            "\u2705 Rule is active now.",
+            parse_mode="HTML"
+        )
 
-        if approved:
-
-            await update.message.reply_text(
-
-                "\u2705 <b>RULE ADDED & LIVE!</b>\n\n"
-
-                f"\U0001f4e2 <b>Channel:</b> "
-                f"{html.escape(channel_title)}\n\n"
-
-                f"\U0001f50d <code>{html.escape(old_part)}</code>"
-                " \u27a1\ufe0f "
-                f"<code>{html.escape(new_part)}</code>\n\n"
-
-                "\U0001f512 Ye rule <b>sirf isi channel</b> "
-                "ke posts par apply hoga.",
-
-                parse_mode="HTML"
-            )
-
-
-        else:
-
-            await update.message.reply_text(
-
-                "\U0001f552 <b>RULE SUBMITTED FOR REVIEW</b>\n\n"
-
-                f"\U0001f4e2 <b>Channel:</b> "
-                f"{html.escape(channel_title)}\n\n"
-
-                f"\U0001f50d <code>{html.escape(old_part)}</code>"
-                " \u27a1\ufe0f "
-                f"<code>{html.escape(new_part)}</code>\n\n"
-
-                "Admin approval ke baad rule isi "
-                "connected channel par live hoga.\n\n"
-
-                "Status:\n"
-                "<code>/status</code>",
-
-                parse_mode="HTML"
-            )
 
 
     except Exception as e:
@@ -1468,225 +1534,6 @@ async def del_rule(
 
             parse_mode="HTML"
         )
-
-
-# ============================================================
-# /APPROVE
-# ============================================================
-
-async def approve_rule(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE
-):
-
-    user_id = update.effective_user.id
-
-
-    if not is_admin(user_id):
-
-        await update.message.reply_text(
-
-            "\u26d4 <b>Access Denied</b>\n\n"
-            "Sirf admin approve kar sakte hain.",
-
-            parse_mode="HTML"
-        )
-
-        return
-
-
-    channel_id = await get_command_channel(
-        update
-    )
-
-
-    if channel_id is None:
-        return
-
-
-    old_text = " ".join(
-        context.args
-    ).strip()
-
-
-    if not old_text:
-
-        await update.message.reply_text(
-
-            "\u2728 <b>Format:</b>\n"
-            "<code>/approve old_text</code>",
-
-            parse_mode="HTML"
-        )
-
-        return
-
-
-    config = get_channel_config(
-        channel_id
-    )
-
-
-    rules = config.get(
-        "replacement_rules",
-        {}
-    )
-
-
-    if old_text not in rules:
-
-        await update.message.reply_text(
-
-            "\u274c Rule not found.",
-
-            parse_mode="HTML"
-        )
-
-        return
-
-
-    rule = rules[old_text]
-
-
-    if not isinstance(rule, dict):
-
-        rule = {
-            "new": rule,
-
-            "added_by": None,
-        }
-
-
-    rule["approved"] = True
-
-
-    rules[old_text] = rule
-
-
-    update_channel_config(
-
-        channel_id,
-
-        "replacement_rules",
-
-        rules
-    )
-
-
-    await update.message.reply_text(
-
-        "\u2705 <b>RULE APPROVED!</b>\n\n"
-
-        f"<code>{html.escape(old_text)}</code>\n\n"
-
-        "Ab ye rule selected channel mein LIVE hai.",
-
-        parse_mode="HTML"
-    )
-
-
-# ============================================================
-# /PENDING
-# ============================================================
-
-async def pending(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE
-):
-
-    user_id = update.effective_user.id
-
-
-    if not is_admin(user_id):
-
-        await update.message.reply_text(
-
-            "\u26d4 <b>Access Denied.</b>",
-
-            parse_mode="HTML"
-        )
-
-        return
-
-
-    channel_id = await get_command_channel(
-        update
-    )
-
-
-    if channel_id is None:
-        return
-
-
-    config = get_channel_config(
-        channel_id
-    )
-
-
-    rules = config.get(
-        "replacement_rules",
-        {}
-    )
-
-
-    pending_rules = {
-
-        old: rule
-
-        for old, rule in rules.items()
-
-        if not rule_approved(rule)
-    }
-
-
-    if not pending_rules:
-
-        await update.message.reply_text(
-
-            "\u2705 <i>No pending rules.</i>",
-
-            parse_mode="HTML"
-        )
-
-        return
-
-
-    message = (
-        "\U0001f552 <b>PENDING RULES</b>\n\n"
-    )
-
-
-    for old, rule in pending_rules.items():
-
-        owner = rule_owner(
-            rule
-        )
-
-
-        message += (
-
-            f"\U0001f50d <code>{html.escape(old)}</code>"
-            " \u27a1\ufe0f "
-
-            f"<code>{html.escape(rule_value(rule))}</code>\n"
-
-            f"\U0001f464 By: <code>{owner}</code>\n\n"
-        )
-
-
-    message += (
-
-        "Approve:\n"
-        "<code>/approve old_text</code>"
-    )
-
-
-    await update.message.reply_text(
-
-        message,
-
-        parse_mode="HTML"
-    )
 
 
 # ============================================================
@@ -1974,42 +1821,18 @@ async def status(
             replacement_rules.items()
         ):
 
-            tag = (
-
-                "\U0001f7e2 LIVE"
-
-                if rule_approved(rule)
-
-                else "\U0001f552 PENDING"
-            )
-
-
-            owner = rule_owner(
-                rule
-            )
-
+            owner = rule_owner(rule)
 
             owner_tag = (
-
                 f" \u2014 By <code>{owner}</code>"
-
                 if owner
-
                 else ""
             )
 
-
             message += (
-
                 f"\U0001f50d <code>{html.escape(old)}</code>"
                 " \u27a1\ufe0f "
-
-                f"<code>"
-                f"{html.escape(rule_value(rule) or '[REMOVED]')}"
-                f"</code>"
-
-                f" \u2014 {tag}"
-
+                f"<code>{html.escape(rule_value(rule) or '[REMOVED]')}</code>"
                 f"{owner_tag}\n"
             )
 
@@ -2144,7 +1967,8 @@ def get_help_text():
         "Bot ko apne Telegram channel mein "
         "<b>Administrator</b> banao.\n\n"
 
-        "Channel automatically detect hokar connect ho jayega. \u2705\n\n"
+        "Bot tumhe Channel ID bhejega. Us ID ke saath:\n"
+        "<code>/connect CHANNEL_ID</code>\n\n"
 
         "\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n\n"
 
@@ -2212,9 +2036,6 @@ def get_help_text():
         "\U0001f510 <b>CHANNEL ISOLATION</b>\n\n"
 
         "Har connected channel ki settings alag hain.\n\n"
-
-        "Ek channel ka replacement rule "
-        "doosre channel par apply nahi hota.\n\n"
 
         "\U0001f4a1 <i>Need help? Contact Support.</i>"
     )
@@ -2424,11 +2245,9 @@ async def start(
             "1\ufe0f\u20e3 Click <b>Add Me to Your Channel</b>\n"
             "2\ufe0f\u20e3 Select your channel\n"
             "3\ufe0f\u20e3 Give me Administrator permission\n"
-            "4\ufe0f\u20e3 I will automatically connect your channel\n\n"
-
-            "After connection, use:\n"
-            "<code>/channels</code>\n"
-            "<code>/usechannel CHANNEL_ID</code>\n"
+            "4\ufe0f\u20e3 I will send you the Channel ID\n"
+            "5\ufe0f\u20e3 Send <code>/connect CHANNEL_ID</code>\n\n"
+            "Then add rules with:\n"
             "<code>/addrule old -> new</code>\n\n"
 
             "\U0001f447 Tap <b>Help</b> if you need a complete guide."
@@ -2520,11 +2339,8 @@ async def button_handler(
 
                 "\U0001f916 Smart automatic caption editor.\n\n"
 
-                "\u2795 Add me to your channel as Admin "
-                "and your channel will automatically connect.\n\n"
-
-                "\U0001f512 Your rules will work only in "
-                "your connected channel.\n\n"
+                "\u2795 Add me to your channel as Admin.\n"
+                "I will send you the Channel ID to connect.\n\n"
 
                 "\U0001f447 Choose an option below."
             )
@@ -2581,7 +2397,7 @@ def main():
     app = (
         ApplicationBuilder()
         .token(TOKEN)
-        .concurrent_updates(CAPTION_WORKERS)
+        .concurrent_updates(10)
         .build()
     )
 
@@ -2602,6 +2418,14 @@ def main():
         CommandHandler(
             "help",
             help_command
+        )
+    )
+
+
+    app.add_handler(
+        CommandHandler(
+            "connect",
+            connect_channel
         )
     )
 
@@ -2669,21 +2493,6 @@ def main():
         )
     )
 
-
-    app.add_handler(
-        CommandHandler(
-            "approve",
-            approve_rule
-        )
-    )
-
-
-    app.add_handler(
-        CommandHandler(
-            "pending",
-            pending
-        )
-    )
 
 
     app.add_handler(
