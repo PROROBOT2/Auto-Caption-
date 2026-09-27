@@ -21,6 +21,7 @@ from telegram.error import (
     TimedOut,
     NetworkError,
     BadRequest,
+    Conflict,
 )
 from telegram.ext import (
     ApplicationBuilder,
@@ -1489,6 +1490,31 @@ async def start_caption_worker(
     application,
 ):
     global _caption_worker_task
+
+    # ----------------------------------------------------
+    # Clear any stale webhook/session left over from a
+    # previous deploy before this instance starts polling.
+    # Harmless if there wasn't one. This does NOT force-kill
+    # another *currently running* instance -- Telegram only
+    # allows one active getUpdates connection per bot token,
+    # so if an old instance is still alive, it will get
+    # kicked out on its own the moment this instance's first
+    # getUpdates call lands (the "Conflict" you saw briefly
+    # in the logs is exactly that handover happening).
+    # ----------------------------------------------------
+
+    try:
+
+        await application.bot.delete_webhook(
+            drop_pending_updates=True
+        )
+
+    except Exception as exc:
+
+        logger.warning(
+            "⚠️ delete_webhook cleanup failed: %s",
+            exc,
+        )
 
     if _caption_worker_task is None:
 
@@ -3958,6 +3984,26 @@ async def error_handler(
 
     if isinstance(
         error,
+        Conflict,
+    ):
+
+        # Expected for a few seconds during redeploys, while
+        # the old instance's getUpdates connection is being
+        # replaced by this one. Not fatal -- PTB automatically
+        # keeps retrying and settles once the old instance
+        # (or webhook) is fully gone.
+
+        logger.warning(
+            "⚠️ Telegram Conflict (another getUpdates was "
+            "active) -- normal during a redeploy handover, "
+            "will self-resolve: %s",
+            error,
+        )
+
+        return
+
+    if isinstance(
+        error,
         RetryAfter,
     ):
 
@@ -4231,7 +4277,10 @@ def main():
     # --------------------------------------------------------
 
     app.run_polling(
-        allowed_updates=Update.ALL_TYPES
+        allowed_updates=Update.ALL_TYPES,
+        drop_pending_updates=True,
+        timeout=10,
+        poll_interval=0.0,
     )
 
 
