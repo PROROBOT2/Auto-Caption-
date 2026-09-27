@@ -205,7 +205,51 @@ except ValueError:
 # This intentionally prioritizes stability over raw burst speed.
 # ============================================================
 
-EDIT_INTERVAL_SECONDS = 1.25
+ENGINE_VERSION = "2.1"
+
+BOT_START_TIME = time.time()
+
+# Adaptive interval:
+#
+# Starts fast. Speeds up further on every clean edit.
+# Only backs off when Telegram actually returns a 429,
+# then gradually speeds back up again.
+#
+# This replaces the old fixed 1.25s-per-edit pace with
+# something that runs near MIN_EDIT_INTERVAL under normal
+# conditions and only slows down when it truly needs to.
+
+MIN_EDIT_INTERVAL = 0.35
+
+MAX_EDIT_INTERVAL = 3.0
+
+_current_edit_interval = MIN_EDIT_INTERVAL
+
+
+def get_current_edit_interval():
+    return _current_edit_interval
+
+
+def speed_up_edit_interval():
+    global _current_edit_interval
+
+    _current_edit_interval = max(
+        MIN_EDIT_INTERVAL,
+        _current_edit_interval * 0.85,
+    )
+
+
+def slow_down_edit_interval(retry_after):
+    global _current_edit_interval
+
+    _current_edit_interval = min(
+        MAX_EDIT_INTERVAL,
+        max(
+            _current_edit_interval * 1.8,
+            retry_after * 0.25,
+        ),
+    )
+
 
 MAX_EDIT_RETRIES = 4
 
@@ -241,6 +285,42 @@ _config_locks = {}
 
 # Recently applied messages
 _recent_applied = OrderedDict()
+
+
+# ============================================================
+# UPTIME
+# ============================================================
+
+def get_uptime_text():
+    elapsed = int(
+        time.time() - BOT_START_TIME
+    )
+
+    days, remainder = divmod(
+        elapsed,
+        86400,
+    )
+
+    hours, remainder = divmod(
+        remainder,
+        3600,
+    )
+
+    minutes, seconds = divmod(
+        remainder,
+        60,
+    )
+
+    if days:
+        return f"{days}d {hours}h {minutes}m"
+
+    if hours:
+        return f"{hours}h {minutes}m"
+
+    if minutes:
+        return f"{minutes}m {seconds}s"
+
+    return f"{seconds}s"
 
 
 # ============================================================
@@ -516,6 +596,12 @@ def default_channel_config(
             "⚡ Fast Download Links @DG_Contents"
         ),
 
+        # When True, any URL/domain left in the caption body
+        # (things Telegram would normally turn blue and
+        # clickable) is defused so it renders as plain bold
+        # text instead of a live link.
+        "link_guard": True,
+
         "created_at": time.time(),
     }
 
@@ -728,6 +814,91 @@ def rule_owner(rule):
 
 
 # ============================================================
+# LINK GUARD
+# ============================================================
+#
+# Telegram auto-detects raw URLs / bare domains (example.com,
+# www.site.com, https://...) inside plain text and turns them
+# into live, blue, clickable links -- even when the whole
+# message is otherwise wrapped in <b>.
+#
+# Link Guard defuses that auto-detection by slipping a
+# zero-width space (invisible, U+200B) into the pattern
+# Telegram's parser looks for. The text still reads exactly
+# the same to a human, it just stops qualifying as a link, so
+# it stays plain bold text instead of turning blue.
+# ============================================================
+
+ZERO_WIDTH_SPACE = "\u200b"
+
+_LINK_TLDS = (
+    "com|net|org|in|co|io|me|link|xyz|info|live|pro|club|"
+    "site|online|shop|store|app|dev|gg|tv|cc|ai|top|vip|"
+    "biz|ws|us|uk|to|fun|icu|click|world|life"
+)
+
+LINK_GUARD_PATTERN = re.compile(
+    r"(?P<scheme>https?://\S+)"
+    r"|(?P<www>www\.\S+)"
+    r"|(?P<bare>\b[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?"
+    r"(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?)*"
+    r"\.(?:" + _LINK_TLDS + r")(?:/\S*)?\b)",
+    re.IGNORECASE,
+)
+
+
+def _defuse_link_token(match):
+    token = match.group(0)
+
+    # Break the scheme ("https://" -> "https" + ZWS + "://")
+    token = re.sub(
+        r"(https?)(://)",
+        r"\1" + ZERO_WIDTH_SPACE + r"\2",
+        token,
+        flags=re.IGNORECASE,
+    )
+
+    # Break "www."
+    token = re.sub(
+        r"(www)(\.)",
+        r"\1" + ZERO_WIDTH_SPACE + r"\2",
+        token,
+        flags=re.IGNORECASE,
+    )
+
+    # Break every remaining dot in the domain/path so it no
+    # longer matches Telegram's own link-detection pattern.
+    token = token.replace(
+        ".",
+        ZERO_WIDTH_SPACE + ".",
+    )
+
+    # Collapse any doubled-up zero-width spaces created above.
+    token = token.replace(
+        ZERO_WIDTH_SPACE + ZERO_WIDTH_SPACE,
+        ZERO_WIDTH_SPACE,
+    )
+
+    return token
+
+
+def apply_link_guard(text):
+    """
+    Defuses any URL/bare-domain left in `text` so Telegram
+    renders it as plain bold text instead of a blue link.
+    Visually invisible to the reader.
+    """
+
+    if not text:
+        return text
+
+    return LINK_GUARD_PATTERN.sub(
+        _defuse_link_token,
+        text,
+    )
+
+
+# ============================================================
 # CAPTION TRANSFORM
 # ============================================================
 
@@ -822,6 +993,19 @@ def transform_caption(
     )
 
     final_text = final_text.strip()
+
+    # --------------------------------------------------------
+    # Link Guard (defuse remaining URLs/domains -> plain bold)
+    # --------------------------------------------------------
+
+    if config.get(
+        "link_guard",
+        True,
+    ):
+
+        final_text = apply_link_guard(
+            final_text
+        )
 
     # --------------------------------------------------------
     # Header / Body / Footer
@@ -1178,8 +1362,10 @@ async def caption_batch_worker():
     """
 
     logger.info(
-        "🚀 Stable caption worker online | interval=%.2fs",
-        EDIT_INTERVAL_SECONDS,
+        "🚀 Stable caption worker online | "
+        "adaptive interval %.2fs-%.2fs",
+        MIN_EDIT_INTERVAL,
+        MAX_EDIT_INTERVAL,
     )
 
     while True:
@@ -1217,14 +1403,20 @@ async def caption_batch_worker():
 
                 retry_after = result[2]
 
+                slow_down_edit_interval(
+                    retry_after
+                )
+
                 wait_time = (
                     retry_after
                     + 1.5
                 )
 
                 logger.warning(
-                    "🛑 RATE LIMIT | waiting %.1fs",
+                    "🛑 RATE LIMIT | waiting %.1fs | "
+                    "new interval=%.2fs",
                     wait_time,
+                    get_current_edit_interval(),
                 )
 
                 await send_important_log(
@@ -1260,12 +1452,16 @@ async def caption_batch_worker():
                         key
                     )
 
+            elif status_value == "ok":
+
+                speed_up_edit_interval()
+
             # ------------------------------------------------
-            # Controlled interval
+            # Adaptive interval
             # ------------------------------------------------
 
             await asyncio.sleep(
-                EDIT_INTERVAL_SECONDS
+                get_current_edit_interval()
             )
 
             _caption_queue.task_done()
@@ -1310,8 +1506,8 @@ async def start_caption_worker(
         application.bot,
         "BOT ONLINE",
         (
-            "Premium Auto Caption Engine started.\n"
-            f"Edit interval: {EDIT_INTERVAL_SECONDS:.2f}s\n"
+            f"Premium Auto Caption Engine v{ENGINE_VERSION} started.\n"
+            f"Edit interval: {MIN_EDIT_INTERVAL:.2f}s-{MAX_EDIT_INTERVAL:.2f}s (adaptive)\n"
             "Mode: Stable Sequential Queue"
         ),
         "START",
@@ -1879,9 +2075,12 @@ def get_panel_text(
         "• Automatic caption editing\n"
         "• Smart replacement rules\n"
         "• Link & mention cleanup\n"
+        "• 🔗 Link Guard (no more blue links)\n"
         "• Custom branding\n"
         "• Channel-isolated settings\n"
         "• Stable anti-429 queue\n\n"
+
+        f"<i>v{ENGINE_VERSION} Premium • Uptime {get_uptime_text()}</i>\n\n"
 
         "👇 <b>Choose an option</b>"
     )
@@ -1928,6 +2127,7 @@ async def start(
             "• Smart word replacement\n"
             "• Unwanted link cleanup\n"
             "• Mention cleanup\n"
+            "• 🔗 Link Guard — no more blue links\n"
             "• Custom header/footer\n"
             "• Multi-channel support\n"
             "• Stable anti-rate-limit engine\n\n"
@@ -1960,6 +2160,7 @@ async def start(
             "• 🔄 Replace unwanted words\n"
             "• 🧹 Clean unwanted links\n"
             "• 👤 Clean unwanted mentions\n"
+            "• 🔗 Turn stray links into plain bold text\n"
             "• 🎨 Add custom branding\n"
             "• 📢 Manage multiple channels\n"
             "• 🛡️ Stable processing system\n\n"
@@ -2673,6 +2874,79 @@ async def clear_rules(
 
 
 # ============================================================
+# /LINKGUARD
+# ============================================================
+
+async def link_guard_command(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+):
+    channel_id = await get_command_channel(
+        update
+    )
+
+    if channel_id is None:
+        return
+
+    if not context.args:
+
+        config = get_channel_config(
+            channel_id
+        )
+
+        current = config.get(
+            "link_guard",
+            True,
+        )
+
+        await update.message.reply_text(
+            "🔗 <b>LINK GUARD</b>\n\n"
+
+            f"Status: {'🟢 ON' if current else '⚪ OFF'}\n\n"
+
+            "Jab ON hai, caption mein bache hue "
+            "URLs/domains blue link nahi banenge — "
+            "wo plain bold text ki tarah dikhenge.\n\n"
+
+            "Toggle karne ke liye:\n"
+            "<code>/linkguard on</code>\n"
+            "<code>/linkguard off</code>",
+            parse_mode="HTML",
+        )
+
+        return
+
+    choice = context.args[0].strip().lower()
+
+    if choice not in (
+        "on",
+        "off",
+    ):
+
+        await update.message.reply_text(
+            "❌ Use <code>/linkguard on</code> "
+            "ya <code>/linkguard off</code>.",
+            parse_mode="HTML",
+        )
+
+        return
+
+    enabled = choice == "on"
+
+    update_channel_config(
+        channel_id,
+        "link_guard",
+        enabled,
+    )
+
+    await update.message.reply_text(
+        "🔗 <b>LINK GUARD UPDATED</b>\n\n"
+        f"Status: {'🟢 ON' if enabled else '⚪ OFF'}",
+        parse_mode="HTML",
+    )
+
+
+# ============================================================
 # STATUS BUILDER
 # ============================================================
 
@@ -2740,7 +3014,8 @@ def build_status_text(
         f"<code>{_caption_queue.qsize()}</code>\n"
 
         f"⏱️ <b>Edit Interval:</b> "
-        f"<code>{EDIT_INTERVAL_SECONDS:.2f}s</code>\n\n"
+        f"<code>{get_current_edit_interval():.2f}s</code> "
+        f"<i>(adaptive, {MIN_EDIT_INTERVAL:.2f}-{MAX_EDIT_INTERVAL:.2f}s)</i>\n\n"
 
         "🎨 <b>Branding</b>\n"
 
@@ -2755,6 +3030,14 @@ def build_status_text(
         "• Duplicate merge: 🟢\n"
         "• Rate-limit handling: 🟢\n"
         "• Sequential queue: 🟢\n"
+
+        f"• Link Guard: "
+        f"{'🟢 ON' if config.get('link_guard', True) else '⚪ OFF'}\n\n"
+
+        "━━━━━━━━━━━━━━━━━━\n\n"
+
+        f"⚙️ <b>Engine:</b> v{ENGINE_VERSION} Premium\n"
+        f"⏳ <b>Uptime:</b> {get_uptime_text()}\n"
     )
 
     return message
@@ -2907,6 +3190,7 @@ def get_help_text():
         "🔄 Word replacement\n"
         "🧹 Link cleanup\n"
         "👤 Mention cleanup\n"
+        "🔗 Link Guard (blue links → plain bold)\n"
         "🎨 Custom header/footer\n"
         "📢 Multiple channels\n"
         "🛡️ Anti-loop protection\n"
@@ -2925,6 +3209,10 @@ def get_help_text():
         "🎨 <b>BRANDING</b>\n"
         "<code>/setheader Your Header</code>\n"
         "<code>/setfooter Your Footer</code>\n\n"
+
+        "🔗 <b>LINK GUARD</b>\n"
+        "<code>/linkguard on</code>\n"
+        "<code>/linkguard off</code>\n\n"
 
         "📊 <b>STATUS</b>\n"
         "<code>/status</code>\n\n"
@@ -3156,6 +3444,11 @@ async def branding_view(
         else "<i>Disabled</i>"
     )
 
+    link_guard_on = config.get(
+        "link_guard",
+        True,
+    )
+
     text = (
         "🎨 <b>BRANDING CENTER</b>\n"
         "━━━━━━━━━━━━━━━━━━\n\n"
@@ -3165,6 +3458,9 @@ async def branding_view(
 
         "📌 <b>Footer</b>\n"
         f"{footer_display}\n\n"
+
+        "📌 <b>Link Guard</b>\n"
+        f"{'🟢 ON — stray links show as plain bold' if link_guard_on else '⚪ OFF — stray links can turn blue'}\n\n"
 
         "━━━━━━━━━━━━━━━━━━\n\n"
 
@@ -3180,6 +3476,19 @@ async def branding_view(
 
     keyboard = InlineKeyboardMarkup(
         [
+            [
+                InlineKeyboardButton(
+                    (
+                        "🔗 Turn Link Guard OFF"
+                        if link_guard_on
+                        else "🔗 Turn Link Guard ON"
+                    ),
+                    callback_data=(
+                        f"linkguard:{'off' if link_guard_on else 'on'}"
+                    ),
+                )
+            ],
+
             [
                 InlineKeyboardButton(
                     "📊 Status",
@@ -3580,6 +3889,54 @@ async def button_handler(
         return
 
     # --------------------------------------------------------
+    # LINK GUARD TOGGLE
+    # --------------------------------------------------------
+
+    if data.startswith(
+        "linkguard:"
+    ):
+
+        channel_id = get_selected_channel(
+            user_id
+        )
+
+        if not channel_id or not user_owns_channel(
+            user_id,
+            channel_id,
+        ):
+
+            await query.answer(
+                "Select a channel first.",
+                show_alert=True,
+            )
+
+            return
+
+        enabled = (
+            data.split(
+                ":",
+                1,
+            )[1]
+            == "on"
+        )
+
+        update_channel_config(
+            channel_id,
+            "link_guard",
+            enabled,
+        )
+
+        await query.answer(
+            f"Link Guard {'enabled' if enabled else 'disabled'}."
+        )
+
+        await branding_view(
+            query
+        )
+
+        return
+
+    # --------------------------------------------------------
     # UNKNOWN
     # --------------------------------------------------------
 
@@ -3783,6 +4140,13 @@ def main():
 
     app.add_handler(
         CommandHandler(
+            "linkguard",
+            link_guard_command,
+        )
+    )
+
+    app.add_handler(
+        CommandHandler(
             "disconnect",
             disconnect_channel,
         )
@@ -3842,8 +4206,9 @@ def main():
     )
 
     logger.info(
-        "⏱️ Edit interval: %.2fs",
-        EDIT_INTERVAL_SECONDS,
+        "⏱️ Edit interval: %.2fs-%.2fs (adaptive)",
+        MIN_EDIT_INTERVAL,
+        MAX_EDIT_INTERVAL,
     )
 
     logger.info(
