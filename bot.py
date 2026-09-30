@@ -57,6 +57,11 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
+# HTTP request logs can include the full Telegram Bot API URL, which contains
+# the bot token. Keep those libraries at WARNING to avoid leaking credentials.
+for _http_logger_name in ("httpx", "httpcore", "http", "telegram.request"):
+    logging.getLogger(_http_logger_name).setLevel(logging.WARNING)
+
 
 # ============================================================
 # RENDER HEALTH SERVER
@@ -239,7 +244,7 @@ except ValueError:
 # This intentionally prioritizes stability over raw burst speed.
 # ============================================================
 
-ENGINE_VERSION = "2.2"
+ENGINE_VERSION = "2.3"
 
 BOT_START_TIME = time.time()
 
@@ -1095,9 +1100,10 @@ async def safe_edit(
     message_id,
     content,
     is_caption,
+    is_media=False,
 ):
     """
-    Performs ONE edit.
+    Edit a text message or a media caption using the matching Bot API method.
 
     Important:
     RetryAfter is passed to worker.
@@ -1111,7 +1117,9 @@ async def safe_edit(
 
         try:
 
-            if is_caption:
+            # Media posts use editMessageCaption, even if caption detection
+            # was incomplete in an incoming/edited update.
+            if is_caption or is_media:
 
                 return await bot.edit_message_caption(
                     chat_id=channel_id,
@@ -1216,6 +1224,11 @@ async def run_edit_job(
         "is_caption"
     ]
 
+    is_media = job.get(
+        "is_media",
+        is_caption,
+    )
+
     final_plain = job[
         "final_plain"
     ]
@@ -1230,6 +1243,7 @@ async def run_edit_job(
             message_id=message_id,
             content=content,
             is_caption=is_caption,
+            is_media=is_media,
         )
 
         elapsed = (
@@ -1308,6 +1322,13 @@ async def run_edit_job(
             message_id,
             exc,
         )
+
+        if "message can't be edited" in error_text:
+            logger.error(
+                "ℹ️ Check that the bot is an administrator in this channel "
+                "with the 'Edit messages' permission. Telegram may reject "
+                "editing posts made by other admins when that right is absent."
+            )
 
         return (
             "failed",
@@ -1726,8 +1747,34 @@ async def edit_channel_caption(
         # Queue
         # ----------------------------------------------------
 
+        # Detect media independently from caption text. Photo/video posts
+        # with captions must use editMessageCaption, not editMessageText.
+        media_fields = (
+            "photo",
+            "video",
+            "animation",
+            "document",
+            "audio",
+            "voice",
+            "video_note",
+        )
+        is_media = any(
+            bool(getattr(msg, field, None))
+            for field in media_fields
+        )
         is_caption = (
             msg.caption is not None
+            or is_media
+        )
+
+        logger.info(
+            "🧪 EDIT TARGET | channel=%s message=%s "
+            "has_caption=%s is_media=%s method=%s",
+            channel_id,
+            message_id,
+            msg.caption is not None,
+            is_media,
+            "editMessageCaption" if is_caption else "editMessageText",
         )
 
         job = {
@@ -1742,6 +1789,8 @@ async def edit_channel_caption(
             "final_plain": final_plain,
 
             "is_caption": is_caption,
+
+            "is_media": is_media,
         }
 
         await enqueue_caption_job(
