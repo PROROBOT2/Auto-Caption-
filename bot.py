@@ -63,19 +63,43 @@ logger = logging.getLogger(__name__)
 # ============================================================
 
 def start_dummy_server():
+    """Expose only a tiny health endpoint for hosting platforms.
+
+    Do not use SimpleHTTPRequestHandler here: it can expose source files
+    and directory listings from the process working directory.
+    """
     port = int(os.environ.get("PORT", "10000"))
 
-    class QuietHandler(http.server.SimpleHTTPRequestHandler):
+    class HealthHandler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            if self.path not in ("/", "/health", "/healthz"):
+                self.send_response(404)
+                self.send_header("Content-Type", "text/plain; charset=utf-8")
+                self.end_headers()
+                self.wfile.write(b"Not Found")
+                return
+
+            payload = b"OK"
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.send_header("Content-Length", str(len(payload)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(payload)
+
         def log_message(self, format, *args):
             pass
 
-    try:
-        with socketserver.TCPServer(("", port), QuietHandler) as httpd:
-            logger.info("🌐 Health server started on port %s", port)
-            httpd.serve_forever()
+    class ThreadingHTTPServer(socketserver.ThreadingTCPServer):
+        allow_reuse_address = True
+        daemon_threads = True
 
+    try:
+        with ThreadingHTTPServer(("0.0.0.0", port), HealthHandler) as httpd:
+            logger.info("🌐 Health endpoint started on port %s", port)
+            httpd.serve_forever()
     except Exception as exc:
-        logger.warning("Health server stopped: %s", exc)
+        logger.warning("Health endpoint stopped: %s", exc)
 
 
 # ============================================================
@@ -122,6 +146,15 @@ db = db_client["AutoCaptionBotDB"]
 
 channels_col = db["connected_channels"]
 users_col = db["user_settings"]
+
+# Keep common lookups fast as the number of connected channels grows.
+# Index creation is idempotent and safe to run on every startup.
+try:
+    channels_col.create_index("owner_user_id", name="owner_user_id_idx")
+    channels_col.create_index("channel_id", name="channel_id_idx")
+    users_col.create_index("user_id", name="user_id_idx", sparse=True)
+except Exception as exc:
+    logger.warning("MongoDB index setup skipped: %s", exc)
 
 
 # ============================================================
@@ -206,7 +239,7 @@ except ValueError:
 # This intentionally prioritizes stability over raw burst speed.
 # ============================================================
 
-ENGINE_VERSION = "2.1"
+ENGINE_VERSION = "2.2"
 
 BOT_START_TIME = time.time()
 
@@ -2085,7 +2118,8 @@ def get_panel_text(
 
     return (
         "⚡ <b>AUTO CAPTION ENGINE</b>\n"
-        "━━━━━━━━━━━━━━━━━━\n\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        "<i>SMART • STABLE • CHANNEL-FIRST</i>\n\n"
 
         "🎛️ <b>PREMIUM CONTROL PANEL</b>\n\n"
 
@@ -2106,7 +2140,7 @@ def get_panel_text(
         "• Channel-isolated settings\n"
         "• Stable anti-429 queue\n\n"
 
-        f"<i>v{ENGINE_VERSION} Premium • Uptime {get_uptime_text()}</i>\n\n"
+        f"<i>Premium Edition v{ENGINE_VERSION} • Uptime {get_uptime_text()}</i>\n\n"
 
         "👇 <b>Choose an option</b>"
     )
@@ -3011,7 +3045,8 @@ def build_status_text(
 
     message = (
         "⚡ <b>AUTO CAPTION ENGINE</b>\n"
-        "━━━━━━━━━━━━━━━━━━\n\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        "<i>SMART • STABLE • CHANNEL-FIRST</i>\n\n"
 
         "📊 <b>CHANNEL STATUS</b>\n\n"
 
@@ -3218,6 +3253,7 @@ def get_help_text():
         "👤 Mention cleanup\n"
         "🔗 Link Guard (blue links → plain bold)\n"
         "🎨 Custom header/footer\n"
+        "🧪 Caption preview before publishing (/preview)\n"
         "📢 Multiple channels\n"
         "🛡️ Anti-loop protection\n"
         "⏳ Stable rate-limit handling\n\n"
@@ -3297,6 +3333,59 @@ async def help_command(
             text=get_help_text(),
             parse_mode="HTML",
             reply_markup=keyboard,
+        )
+
+
+# ============================================================
+# CAPTION PREVIEW (PREMIUM QUALITY-OF-LIFE TOOL)
+# ============================================================
+
+async def preview_command(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+):
+    """Preview the selected channel's caption transformations without posting."""
+    user = update.effective_user
+    message = update.effective_message
+    if not user or not message:
+        return
+
+    source_text = " ".join(context.args).strip()
+    if not source_text:
+        await message.reply_text(
+            "🧪 <b>Caption Preview</b>\n\n"
+            "Send sample text after the command:\n"
+            "<code>/preview MovieHub presents https://example.com</code>\n\n"
+            "Your selected channel's rules, header, footer and Link Guard will be applied.\n"
+            "Nothing will be posted to your channel.",
+            parse_mode="HTML",
+        )
+        return
+
+    channel_id = get_selected_channel(user.id)
+    if not channel_id or not user_owns_channel(user.id, channel_id):
+        await message.reply_text(
+            "⚠️ Select one of your connected channels first with /channels."
+        )
+        return
+
+    config = get_channel_config(channel_id)
+    final_plain, final_html = transform_caption(source_text, config)
+    header = (
+        "🧪 <b>CAPTION PREVIEW</b>\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        "<i>Preview only — nothing was published.</i>\n\n"
+    )
+
+    if len(header) + len(final_html) <= 4000:
+        await message.reply_text(header + final_html, parse_mode="HTML")
+    else:
+        safe_text = html.escape(final_plain[:3500])
+        await message.reply_text(
+            header
+            + "<i>Output shortened to fit Telegram's message limit.</i>\n\n"
+            + f"<pre>{safe_text}</pre>",
+            parse_mode="HTML",
         )
 
 
@@ -4174,6 +4263,13 @@ def main():
         CommandHandler(
             "status",
             status,
+        )
+    )
+
+    app.add_handler(
+        CommandHandler(
+            "preview",
+            preview_command,
         )
     )
 
