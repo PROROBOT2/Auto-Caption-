@@ -4418,8 +4418,9 @@ def main():
     )
 
     # --------------------------------------------------------
+    
     # Run
-    # --------------------------------------------------------
+    asyncio.set_event_loop(asyncio.new_event_loop())
 
     app.run_polling(
         allowed_updates=Update.ALL_TYPES,
@@ -4427,6 +4428,8 @@ def main():
         timeout=10,
         poll_interval=0.0,
     )
+
+
 
 
 # ============================================================
